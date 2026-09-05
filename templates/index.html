@@ -9,1415 +9,379 @@
 
 <body>
 
-<header class="header">
-  <div class="logo">
-    <span class="logo-icon">▶</span>
-    <span>Drive<span>Batch</span></span>
-  </div>
-
-  <button class="menu-button" id="menuButton">☰</button>
-
-  <nav id="nav">
-    <a href="#scanner">Scanner</a>
-    <a href="#results">Videos</a>
-    <a href="#about">About</a>
-  </nav>
+<header>
+  <div class="logo">Drive<span>Batch</span></div>
+  <button id="menuBtn">☰</button>
 </header>
 
+<nav id="menu">
+  <a href="#scanner">Scanner</a>
+  <a href="#about">About</a>
+</nav>
 
 <main>
 
 <section class="hero">
   <div class="badge">GOOGLE DRIVE VIDEO TOOL</div>
-
-  <h1>
-    Your Drive.<br>
-    <span>Your Videos.</span>
-  </h1>
-
-  <p>
-    Scan folders, preview videos, select multiple files,
-    and download everything in one place.
-  </p>
-
-  <div class="connected">
-    <span class="status-dot"></span>
-    Google Drive connected
-  </div>
+  <h1>DriveBatch</h1>
+  <p>Find, preview and download your Drive videos in batches.</p>
 </section>
 
+<section class="card scanner" id="scanner">
 
-<section class="scanner" id="scanner">
-
-  <div class="card">
-
-    <div class="card-title">
-      <div>
-        <small>STEP 01</small>
-        <h2>Scan your Drive folder</h2>
-      </div>
-
-      <div class="drive-icon">G</div>
-    </div>
-
-    <p class="card-description">
-      Paste a Google Drive folder link below.
-      DriveBatch will search inside all nested folders for videos.
-    </p>
-
-    <div class="input-row">
-
-      <input
-        id="folderUrl"
-        type="url"
-        placeholder="https://drive.google.com/drive/folders/..."
-        autocomplete="off"
-      >
-
-      <button id="scanButton" class="primary-button">
-        <span>Scan Drive</span>
-        <span>→</span>
-      </button>
-
-    </div>
-
-    <div class="hint">
-      🔒 Your Drive files are accessed through Google authentication.
-    </div>
-
+  <div class="title">
+    <div>📁</div>
+    <section>
+      <h2>Scan a Drive folder</h2>
+      <p>Paste your Google Drive folder link below.</p>
+    </section>
   </div>
 
-</section>
+  <div class="input-row">
+    <input id="driveUrl" type="url"
+      placeholder="https://drive.google.com/drive/folders/...">
+    <button class="primary" id="scanBtn">Scan Folder</button>
+  </div>
 
+  <small>Videos inside nested folders will also be found.</small>
+</section>
 
 <section id="results" class="results hidden">
 
-  <div class="results-header">
-
+  <div class="results-head">
     <div>
-      <small>STEP 02</small>
+      <p class="eyebrow">SCAN RESULTS</p>
       <h2>Your videos</h2>
-
-      <div class="folder-stats">
-        <span id="folderName">Folder</span>
-        <span>•</span>
-        <span id="videoCount">0 videos</span>
-        <span>•</span>
-        <span id="totalSize">0 B</span>
-      </div>
+      <p id="folderStats">0 videos • 0 B</p>
     </div>
 
-    <div class="selection-buttons">
-
-      <button id="selectAll" class="small-button">
-        Select all
-      </button>
-
-      <button id="clearAll" class="small-button ghost">
-        Clear
-      </button>
-
+    <div class="buttons">
+      <button class="small" id="selectAll">Select all</button>
+      <button class="small" id="clearAll">Clear</button>
     </div>
-
   </div>
 
+  <input id="search" class="search" placeholder="Search videos...">
 
-  <div class="toolbar">
-
-    <div class="search-box">
-      <span>⌕</span>
-
-      <input
-        id="searchInput"
-        type="search"
-        placeholder="Search videos..."
-      >
-    </div>
-
-    <div class="selection-info">
-      <strong id="selectedCount">0</strong>
-      selected
-      <span>•</span>
-      <strong id="selectedSize">0 B</strong>
-    </div>
-
-  </div>
-
-
-  <div id="videoList" class="video-list"></div>
-
+  <div id="videoList"></div>
 </section>
 
-
-<div id="downloadBar" class="download-bar hidden">
-
+<section id="downloadBar" class="download-bar hidden">
   <div>
-    <strong id="barCount">0 videos selected</strong>
-    <span id="barSize">0 B</span>
+    <strong id="selectedCount">0 selected</strong>
+    <span id="selectedSize">0 B</span>
   </div>
+  <button class="primary" id="downloadSelected">Download Selected</button>
+</section>
 
-  <button id="downloadSelected" class="primary-button">
-    Download Selected
-    <span>↓</span>
-  </button>
-
-</div>
-
-
-<section id="about" class="about">
-
-  <div class="about-card">
-    <span class="about-icon">⚡</span>
-
-    <h2>Built for your Drive.</h2>
-
-    <p>
-      Find videos buried inside folders without manually
-      opening and downloading every file.
-    </p>
+<section class="about" id="about">
+  <div class="card">
+    <h2>Fast & simple</h2>
+    <p>Scan your Drive folder and manage your videos from one place.</p>
   </div>
-
-  <div class="about-card">
-    <span class="about-icon">📦</span>
-
-    <h2>Batch downloads.</h2>
-
-    <p>
-      Select exactly what you want and package your videos
-      into one convenient ZIP file.
-    </p>
+  <div class="card">
+    <h2>Batch downloads</h2>
+    <p>Select multiple videos and download them together as a ZIP.</p>
   </div>
-
-  <div class="about-card">
-    <span class="about-icon">🎬</span>
-
-    <h2>Preview first.</h2>
-
-    <p>
-      Check a video before downloading it.
-    </p>
-  </div>
-
 </section>
 
 </main>
 
-
-<!-- PREVIEW MODAL -->
-
-<div id="previewModal" class="modal hidden">
-
-  <div class="modal-backdrop"></div>
-
-  <div class="modal-box preview-box">
-
-    <button class="modal-close" id="closePreview">
-      ×
-    </button>
-
-    <div class="modal-label">VIDEO PREVIEW</div>
-
-    <h2 id="previewTitle">Video</h2>
-
-    <video
-      id="previewVideo"
-      controls
-      playsinline
-      preload="metadata"
-    ></video>
-
-    <button id="previewDownload" class="primary-button full">
-      Download Video ↓
-    </button>
-
-  </div>
-
-</div>
-
-
-<!-- DOWNLOAD CHOICE MODAL -->
-
-<div id="downloadModal" class="modal hidden">
-
-  <div class="modal-backdrop"></div>
-
+<!-- PREVIEW -->
+<div class="modal hidden" id="previewModal">
   <div class="modal-box">
-
-    <button class="modal-close" id="closeDownload">
-      ×
-    </button>
-
-    <div class="modal-label">DOWNLOAD</div>
-
-    <h2>Download your videos</h2>
-
-    <p id="downloadSummary">
-      Choose how you want to download the selected files.
-    </p>
-
-    <div class="download-options">
-
-      <button id="downloadZip" class="download-option">
-
-        <span class="option-icon">📦</span>
-
-        <span>
-          <strong>Download ZIP</strong>
-          <small>Put all selected videos into one ZIP</small>
-        </span>
-
-        <span>→</span>
-
-      </button>
-
-
-      <button id="downloadIndividual" class="download-option">
-
-        <span class="option-icon">🎬</span>
-
-        <span>
-          <strong>Download individually</strong>
-          <small>Download each selected video separately</small>
-        </span>
-
-        <span>→</span>
-
-      </button>
-
-    </div>
-
+    <button class="close" id="closePreview">×</button>
+    <h2 id="previewTitle">Preview</h2>
+    <video id="previewVideo" controls playsinline></video>
+    <button class="primary full" id="previewDownload">Download Video</button>
   </div>
-
 </div>
 
+<!-- DOWNLOAD CHOICE -->
+<div class="modal hidden" id="downloadModal">
+  <div class="modal-box">
+    <button class="close" id="closeDownload">×</button>
+    <h2>Download videos</h2>
+    <p id="downloadInfo"></p>
 
-<!-- PROGRESS MODAL -->
-
-<div id="progressModal" class="modal hidden">
-
-  <div class="modal-backdrop"></div>
-
-  <div class="modal-box progress-box">
-
-    <div class="progress-icon">📦</div>
-
-    <div class="modal-label">CREATING DOWNLOAD</div>
-
-    <h2>Building your ZIP</h2>
-
-    <p id="progressMessage">
-      Preparing your videos...
-    </p>
-
-    <div class="progress-track">
-
-      <div
-        id="progressFill"
-        class="progress-fill"
-        style="width:0%"
-      ></div>
-
-    </div>
-
-    <div class="progress-row">
-      <span id="progressPercent">0%</span>
-      <span id="progressCount">Starting...</span>
-    </div>
-
-    <button id="cancelDownload" class="cancel-button">
-      Cancel download
-    </button>
-
+    <button class="primary full" id="zipBtn">Download ZIP</button>
+    <button class="secondary full" id="individualBtn">Download individually</button>
   </div>
-
 </div>
 
-
-<!-- SUCCESS MODAL -->
-
-<div id="successModal" class="modal hidden">
-
-  <div class="modal-backdrop"></div>
-
-  <div class="modal-box success-box">
-
-    <div class="success-icon">✓</div>
-
-    <div class="modal-label">READY</div>
-
-    <h2>Your ZIP is ready</h2>
-
-    <p>
-      Your selected videos have been packaged successfully.
-    </p>
-
-    <button id="downloadZipFile" class="primary-button full">
-      Download ZIP ↓
-    </button>
-
-    <button id="closeSuccess" class="cancel-button full">
-      Close
-    </button>
-
+<!-- PROGRESS -->
+<div class="modal hidden" id="progressModal">
+  <div class="modal-box">
+    <h2>Creating ZIP</h2>
+    <p id="progressText">Starting...</p>
+    <div class="progress"><div id="progressFill"></div></div>
+    <button class="secondary full" id="cancelBtn">Cancel</button>
   </div>
-
 </div>
 
+<!-- SUCCESS -->
+<div class="modal hidden" id="successModal">
+  <div class="modal-box">
+    <div class="success">✓</div>
+    <h2>Download ready!</h2>
+    <p>Your ZIP has been created successfully.</p>
+    <button class="primary full" id="successClose">Done</button>
+  </div>
+</div>
 
 <script>
-
-const $ = (id) => document.getElementById(id);
-
-
-/* ELEMENTS */
-
-const folderUrl = $("folderUrl");
-const scanButton = $("scanButton");
-
-const results = $("results");
-const videoList = $("videoList");
-
-const folderName = $("folderName");
-const videoCount = $("videoCount");
-const totalSize = $("totalSize");
-
-const selectedCount = $("selectedCount");
-
-/* IMPORTANT: this is a label, not the function */
-const selectedSizeLabel = $("selectedSize");
-
-const downloadBar = $("downloadBar");
-const barCount = $("barCount");
-const barSize = $("barSize");
-
-const searchInput = $("searchInput");
-
-const selectAll = $("selectAll");
-const clearAll = $("clearAll");
-
-const downloadSelected = $("downloadSelected");
-
-const previewModal = $("previewModal");
-const previewVideo = $("previewVideo");
-const previewTitle = $("previewTitle");
-const previewDownload = $("previewDownload");
-
-const downloadModal = $("downloadModal");
-const downloadSummary = $("downloadSummary");
-
-const progressModal = $("progressModal");
-const progressFill = $("progressFill");
-const progressPercent = $("progressPercent");
-const progressCount = $("progressCount");
-const progressMessage = $("progressMessage");
-
-const successModal = $("successModal");
+const $ = id => document.getElementById(id);
 
 let videos = [];
 let selected = new Set();
-let currentPreview = null;
+let currentVideo = null;
 let currentJob = null;
 
+const driveUrl = $("driveUrl");
+const results = $("results");
+const videoList = $("videoList");
+const downloadBar = $("downloadBar");
 
-/* HELPERS */
-
-function formatBytes(bytes) {
-
-  bytes = Number(bytes || 0);
-
-  if (!bytes) return "0 B";
-
-  const units = ["B", "KB", "MB", "GB", "TB"];
-
-  const i = Math.floor(
-    Math.log(bytes) / Math.log(1024)
-  );
-
-  return (
-    (bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0)
-    + " "
-    + units[i]
-  );
-}
-
-
-function escapeHtml(value) {
-
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-
-}
-
-
-function show(element) {
-
-  if (element) {
-    element.classList.remove("hidden");
+function bytes(n) {
+  if (!n) return "0 B";
+  const u = ["B","KB","MB","GB"];
+  let i = 0;
+  while (n >= 1024 && i < 3) {
+    n /= 1024;
+    i++;
   }
-
+  return n.toFixed(i ? 1 : 0) + " " + u[i];
 }
 
-
-function hide(element) {
-
-  if (element) {
-    element.classList.add("hidden");
-  }
-
+function toast(msg) {
+  alert(msg);
 }
 
-
-function selectedSize() {
-
-  return videos
-    .filter(v => selected.has(v.id))
-    .reduce(
-      (total, v) => total + Number(v.size || 0),
-      0
-    );
-
+function validDrive(url) {
+  return /^https?:\/\/(drive\.google\.com|docs\.google\.com)\//i.test(url);
 }
-
 
 function updateSelection() {
+  let size = videos
+    .filter(v => selected.has(v.id))
+    .reduce((a,v) => a + Number(v.size || 0), 0);
 
-  const count = selected.size;
-  const size = selectedSize();
+  $("selectedCount").textContent = selected.size + " selected";
+  $("selectedSize").textContent = bytes(size);
 
-  selectedCount.textContent = count;
-
-  selectedSizeLabel.textContent =
-    formatBytes(size);
-
-  barCount.textContent =
-    count + (count === 1
-      ? " video selected"
-      : " videos selected");
-
-  barSize.textContent =
-    formatBytes(size);
-
-  if (count) {
-    show(downloadBar);
-  } else {
-    hide(downloadBar);
-  }
-
+  downloadBar.classList.toggle("hidden", selected.size === 0);
 }
 
-
-/* SCAN */
-
-scanButton?.addEventListener(
-  "click",
-  scanDrive
-);
-
-
-folderUrl?.addEventListener(
-  "keydown",
-  event => {
-
-    if (event.key === "Enter") {
-      scanDrive();
-    }
-
-  }
-);
-
-
-async function scanDrive() {
-
-  const url = folderUrl.value.trim();
-
-  if (!url) {
-
-    alert("Paste a Google Drive folder link first.");
-
-    folderUrl.focus();
-
-    return;
-  }
-
-
-  scanButton.disabled = true;
-
-  scanButton.innerHTML =
-    "<span>Scanning...</span><span>⟳</span>";
-
-
-  hide(results);
-
-  try {
-
-    const response = await fetch(
-      "/api/scan",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          folder_url: url
-        })
-      }
-    );
-
-
-    const data = await response.json();
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        data.error || "Could not scan this folder."
-      );
-
-    }
-
-
-    videos = data.videos || [];
-
-    selected.clear();
-
-
-    folderName.textContent =
-      data.folder ||
-      "Google Drive folder";
-
-
-    videoCount.textContent =
-      videos.length +
-      (videos.length === 1 ? " video" : " videos");
-
-
-    totalSize.textContent =
-      data.total_size_display ||
-      formatBytes(
-        videos.reduce(
-          (sum, v) => sum + Number(v.size || 0),
-          0
-        )
-      );
-
-
-    renderVideos();
-
-    show(results);
-
-    results.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
-
-
-  } catch (error) {
-
-    alert(
-      error.message ||
-      "Something went wrong while scanning."
-    );
-
-  } finally {
-
-    scanButton.disabled = false;
-
-    scanButton.innerHTML =
-      "<span>Scan Drive</span><span>→</span>";
-
-  }
-
-}
-
-
-/* RENDER */
-
-function renderVideos() {
-
-  const query =
-    searchInput.value
-      .trim()
-      .toLowerCase();
-
-
-  const filtered = videos.filter(video => {
-
-    return (
-      String(video.name || "")
-        .toLowerCase()
-        .includes(query)
-      ||
-      String(video.path || "")
-        .toLowerCase()
-        .includes(query)
-    );
-
-  });
-
-
-  if (!filtered.length) {
-
-    videoList.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">🔎</div>
-        <h3>No videos found</h3>
-        <p>Try a different search.</p>
-      </div>
-    `;
-
-    updateSelection();
-
-    return;
-  }
-
-
-  videoList.innerHTML =
-    filtered.map(video => {
-
-      const checked =
-        selected.has(video.id)
-          ? "checked"
-          : "";
-
-
-      return `
-
-        <article
-          class="video-card ${checked ? "selected" : ""}"
-          data-id="${escapeHtml(video.id)}"
-        >
-
-          <label class="check-wrap">
-
-            <input
-              type="checkbox"
-              class="video-check"
-              value="${escapeHtml(video.id)}"
-              ${checked}
-            >
-
-            <span class="custom-check">✓</span>
-
-          </label>
-
-
-          <button
-            class="video-preview"
-            data-preview="${escapeHtml(video.id)}"
-            title="Preview video"
-          >
-
-            <span class="play-circle">▶</span>
-
-          </button>
-
-
-          <div class="video-info">
-
-            <h3>
-              ${escapeHtml(video.name)}
-            </h3>
-
-            <p>
-              ${escapeHtml(video.path || "Google Drive")}
-            </p>
-
-            <span class="video-size">
-              ${escapeHtml(
-                video.size_display ||
-                formatBytes(video.size)
-              )}
-            </span>
-
-          </div>
-
-
-          <div class="video-actions">
-
-            <button
-              class="icon-button preview-btn"
-              data-preview="${escapeHtml(video.id)}"
-              title="Preview"
-            >
-              ▶
-            </button>
-
-            <button
-              class="icon-button download-btn"
-              data-download="${escapeHtml(video.id)}"
-              title="Download"
-            >
-              ↓
-            </button>
-
-          </div>
-
-        </article>
-
-      `;
-
-    }).join("");
-
-
-  videoList
-    .querySelectorAll(".video-check")
-    .forEach(checkbox => {
-
-      checkbox.addEventListener(
-        "change",
-        () => {
-
-          const id = checkbox.value;
-
-          if (checkbox.checked) {
-            selected.add(id);
-          } else {
-            selected.delete(id);
-          }
-
-          renderVideos();
-
-        }
-      );
-
-    });
-
-
-  videoList
-    .querySelectorAll("[data-preview]")
-    .forEach(button => {
-
-      button.addEventListener(
-        "click",
-        event => {
-
-          event.preventDefault();
-
-          openPreview(
-            button.dataset.preview
-          );
-
-        }
-      );
-
-    });
-
-
-  videoList
-    .querySelectorAll("[data-download]")
-    .forEach(button => {
-
-      button.addEventListener(
-        "click",
-        event => {
-
-          event.preventDefault();
-
-          downloadSingle(
-            button.dataset.download
-          );
-
-        }
-      );
-
-    });
-
+function render() {
+  const q = $("search").value.toLowerCase();
+
+  videoList.innerHTML = videos
+    .filter(v => (v.name || "").toLowerCase().includes(q))
+    .map(v => `
+      <article class="video-card">
+        <input type="checkbox"
+          ${selected.has(v.id) ? "checked" : ""}
+          onchange="toggle('${v.id}')">
+
+        <button class="preview" onclick="preview('${v.id}')">▶</button>
+
+        <div class="video-info">
+          <h3>${escapeHtml(v.name)}</h3>
+          <p>${escapeHtml(v.path || "Drive")}</p>
+          <small>${bytes(v.size)}</small>
+        </div>
+
+        <button class="icon" onclick="download('${v.id}')">↓</button>
+      </article>
+    `).join("");
 
   updateSelection();
-
 }
 
+function escapeHtml(s) {
+  return String(s || "").replace(/[&<>"']/g,
+    c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",
+            '"':"&quot;","'":"&#039;" })[c]);
+}
 
-/* SEARCH */
+function toggle(id) {
+  selected.has(id) ? selected.delete(id) : selected.add(id);
+  render();
+}
 
-searchInput?.addEventListener(
-  "input",
-  renderVideos
-);
+async function scan() {
+  const url = driveUrl.value.trim();
 
-
-/* SELECT ALL */
-
-selectAll?.addEventListener(
-  "click",
-  () => {
-
-    videos.forEach(
-      video => selected.add(video.id)
-    );
-
-    renderVideos();
-
+  if (!validDrive(url)) {
+    toast("Please paste a valid Google Drive folder link.");
+    return;
   }
-);
 
+  $("scanBtn").disabled = true;
+  $("scanBtn").textContent = "Scanning...";
 
-/* CLEAR */
+  try {
+    const r = await fetch("/api/scan", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({url})
+    });
 
-clearAll?.addEventListener(
-  "click",
-  () => {
+    const data = await r.json();
 
+    if (!r.ok) throw new Error(data.error || "Scan failed");
+
+    videos = data.videos || [];
     selected.clear();
 
-    renderVideos();
+    $("folderStats").textContent =
+      `${videos.length} videos • ${bytes(videos.reduce((a,v)=>a+Number(v.size||0),0))}`;
 
+    results.classList.remove("hidden");
+    render();
+
+    results.scrollIntoView({behavior:"smooth"});
+  } catch(e) {
+    toast(e.message);
+  } finally {
+    $("scanBtn").disabled = false;
+    $("scanBtn").textContent = "Scan Folder";
   }
-);
-/* PREVIEW */
-
-async function openPreview(id) {
-
-  const video = videos.find(v => v.id === id);
-
-  if (!video) return;
-
-  currentPreview = video;
-
-  previewTitle.textContent =
-    video.name || "Video preview";
-
-  previewVideo.src =
-    "/api/preview/" +
-    encodeURIComponent(id);
-
-  show(previewModal);
-
-  try {
-    await previewVideo.play();
-  } catch (e) {
-    /* Browser may require the user to press play */
-  }
-
 }
 
+function preview(id) {
+  const v = videos.find(x => x.id === id);
+  if (!v) return;
+
+  currentVideo = v;
+  $("previewTitle").textContent = v.name;
+  $("previewVideo").src = "/api/preview/" + encodeURIComponent(id);
+  $("previewModal").classList.remove("hidden");
+}
 
 function closePreview() {
-
-  previewVideo.pause();
-
-  previewVideo.removeAttribute("src");
-
-  previewVideo.load();
-
-  hide(previewModal);
-
-  currentPreview = null;
-
+  $("previewVideo").pause();
+  $("previewVideo").src = "";
+  $("previewModal").classList.add("hidden");
 }
 
-
-$("closePreview")?.addEventListener(
-  "click",
-  closePreview
-);
-
-
-previewModal
-  ?.querySelector(".modal-backdrop")
-  ?.addEventListener(
-    "click",
-    closePreview
-  );
-
-
-previewDownload?.addEventListener(
-  "click",
-  () => {
-
-    if (!currentPreview) return;
-
-    downloadSingle(currentPreview.id);
-
-  }
-);
-
-
-/* SINGLE DOWNLOAD */
-
-function downloadSingle(id) {
-
-  const video = videos.find(
-    v => v.id === id
-  );
-
-  if (!video) return;
-
-  window.location.href =
-    "/api/video/" +
-    encodeURIComponent(id);
-
+function download(id) {
+  window.location.href = "/api/video/" + encodeURIComponent(id);
 }
 
+$("scanBtn").onclick = scan;
 
-/* DOWNLOAD MODAL */
+$("search").oninput = render;
 
-downloadSelected?.addEventListener(
-  "click",
-  () => {
+$("selectAll").onclick = () => {
+  videos.forEach(v => selected.add(v.id));
+  render();
+};
 
-    if (!selected.size) {
+$("clearAll").onclick = () => {
+  selected.clear();
+  render();
+};
 
-      alert("Select at least one video.");
+$("closePreview").onclick = closePreview;
 
-      return;
+$("previewDownload").onclick = () => {
+  if (currentVideo) download(currentVideo.id);
+};
 
-    }
+$("downloadSelected").onclick = () => {
+  $("downloadInfo").textContent =
+    `${selected.size} videos selected`;
 
+  $("downloadModal").classList.remove("hidden");
+};
 
-    downloadSummary.textContent =
-      selected.size +
-      (selected.size === 1
-        ? " video selected."
-        : " videos selected.")
-      +
-      " Total size: "
-      +
-      formatBytes(selectedSize());
+$("closeDownload").onclick = () =>
+  $("downloadModal").classList.add("hidden");
 
+$("individualBtn").onclick = async () => {
+  $("downloadModal").classList.add("hidden");
 
-    show(downloadModal);
-
+  for (const id of selected) {
+    download(id);
+    await new Promise(r => setTimeout(r, 1000));
   }
-);
+};
 
-
-function closeDownloadModal() {
-
-  hide(downloadModal);
-
-}
-
-
-$("closeDownload")?.addEventListener(
-  "click",
-  closeDownloadModal
-);
-
-
-downloadModal
-  ?.querySelector(".modal-backdrop")
-  ?.addEventListener(
-    "click",
-    closeDownloadModal
-  );
-
-
-/* INDIVIDUAL DOWNLOADS */
-
-$("downloadIndividual")?.addEventListener(
-  "click",
-  async () => {
-
-    closeDownloadModal();
-
-    const list = videos.filter(
-      v => selected.has(v.id)
-    );
-
-
-    if (!list.length) return;
-
-
-    for (const video of list) {
-
-      downloadSingle(video.id);
-
-      await new Promise(
-        resolve => setTimeout(resolve, 900)
-      );
-
-    }
-
-  }
-);
-
-
-/* ZIP DOWNLOAD */
-
-$("downloadZip")?.addEventListener(
-  "click",
-  startZipDownload
-);
-
-
-async function startZipDownload() {
-
-  closeDownloadModal();
-
-  const ids = Array.from(selected);
-
-  if (!ids.length) {
-
-    alert("Select at least one video.");
-
-    return;
-
-  }
-
-
-  show(progressModal);
-
-  progressFill.style.width = "0%";
-
-  progressPercent.textContent = "0%";
-
-  progressCount.textContent =
-    "Starting...";
-
-  progressMessage.textContent =
-    "Preparing your videos...";
-
+$("zipBtn").onclick = async () => {
+  $("downloadModal").classList.add("hidden");
+  $("progressModal").classList.remove("hidden");
 
   try {
+    const r = await fetch("/api/download/start", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({file_ids:[...selected]})
+    });
 
-    const response = await fetch(
-      "/api/download/start",
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json"
-        },
-
-        body: JSON.stringify({
-          file_ids: ids
-        })
-      }
-    );
-
-
-    const data = await response.json();
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        data.error ||
-        "Could not start the download."
-      );
-
-    }
-
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Could not start download");
 
     currentJob = data.job_id;
-
-    pollDownload();
-
-  } catch (error) {
-
-    hide(progressModal);
-
-    alert(
-      error.message ||
-      "Download could not be started."
-    );
-
+    poll();
+  } catch(e) {
+    $("progressModal").classList.add("hidden");
+    toast(e.message);
   }
+};
 
-}
-
-
-/* ZIP PROGRESS */
-
-async function pollDownload() {
-
+async function poll() {
   if (!currentJob) return;
 
+  const r = await fetch("/api/download/status/" + currentJob);
+  const j = await r.json();
 
-  try {
+  $("progressText").textContent =
+    j.message || `${j.completed || 0} / ${j.total || 0}`;
 
-    const response = await fetch(
-      "/api/download/status/" +
-      encodeURIComponent(currentJob)
-    );
+  $("progressFill").style.width =
+    (j.progress || 0) + "%";
 
-
-    const data = await response.json();
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        data.error ||
-        "Could not check download progress."
-      );
-
-    }
-
-
-    const progress =
-      Number(data.progress || 0);
-
-
-    progressFill.style.width =
-      Math.min(100, progress) + "%";
-
-
-    progressPercent.textContent =
-      Math.round(progress) + "%";
-
-
-    progressMessage.textContent =
-      data.message ||
-      "Creating your ZIP...";
-
-
-    if (data.status === "running") {
-
-      progressCount.textContent =
-        "Processing videos...";
-
-
-      setTimeout(
-        pollDownload,
-        1000
-      );
-
-      return;
-
-    }
-
-
-    if (
-      data.status === "done" ||
-      data.status === "ready" ||
-      data.status === "completed"
-    ) {
-
-      progressFill.style.width = "100%";
-
-      progressPercent.textContent = "100%";
-
-      progressCount.textContent =
-        "Complete";
-
-
-      hide(progressModal);
-
-      show(successModal);
-
-      return;
-
-    }
-
-
-    if (
-      data.status === "cancelled" ||
-      data.status === "canceled"
-    ) {
-
-      hide(progressModal);
-
-      alert("Download cancelled.");
-
-      currentJob = null;
-
-      return;
-
-    }
-
-
-    if (
-      data.status === "error" ||
-      data.status === "failed"
-    ) {
-
-      throw new Error(
-        data.error ||
-        data.message ||
-        "ZIP creation failed."
-      );
-
-    }
-
-
-    setTimeout(
-      pollDownload,
-      1000
-    );
-
-
-  } catch (error) {
-
-    hide(progressModal);
-
-    alert(
-      error.message ||
-      "Something went wrong while creating the ZIP."
-    );
-
-    currentJob = null;
-
-  }
-
-}
-
-
-/* CANCEL ZIP */
-
-$("cancelDownload")?.addEventListener(
-  "click",
-  async () => {
-
-    if (!currentJob) {
-
-      hide(progressModal);
-
-      return;
-
-    }
-
-
-    try {
-
-      await fetch(
-        "/api/download/cancel/" +
-        encodeURIComponent(currentJob),
-        {
-          method: "POST"
-        }
-      );
-
-    } catch (error) {
-      /* Still close the window */
-    }
-
-
-    hide(progressModal);
-
-    currentJob = null;
-
-  }
-);
-
-
-/* FINAL ZIP DOWNLOAD */
-
-$("downloadZipFile")?.addEventListener(
-  "click",
-  () => {
-
-    if (!currentJob) return;
-
+  if (j.status === "done") {
+    $("progressModal").classList.add("hidden");
+    $("successModal").classList.remove("hidden");
 
     window.location.href =
-      "/api/download/file/" +
-      encodeURIComponent(currentJob);
-
+      "/api/download/file/" + currentJob;
+    return;
   }
-);
 
-
-/* SUCCESS CLOSE */
-
-$("closeSuccess")?.addEventListener(
-  "click",
-  () => {
-
-    hide(successModal);
-
-    currentJob = null;
-
+  if (j.status === "error" || j.status === "cancelled") {
+    $("progressModal").classList.add("hidden");
+    toast(j.error || "Download cancelled");
+    return;
   }
-);
 
+  setTimeout(poll, 700);
+}
 
-successModal
-  ?.querySelector(".modal-backdrop")
-  ?.addEventListener(
-    "click",
-    () => {
+$("cancelBtn").onclick = async () => {
+  if (!currentJob) return;
 
-      hide(successModal);
-
-      currentJob = null;
-
-    }
-  );
-
-
-/* MENU */
-
-const menuButton = $("menuButton");
-const nav = $("nav");
-
-
-menuButton?.addEventListener(
-  "click",
-  () => {
-
-    nav?.classList.toggle("open");
-
-  }
-);
-
-
-nav
-  ?.querySelectorAll("a")
-  .forEach(link => {
-
-    link.addEventListener(
-      "click",
-      () => nav.classList.remove("open")
-    );
-
+  await fetch("/api/download/cancel/" + currentJob, {
+    method:"POST"
   });
 
+  $("progressModal").classList.add("hidden");
+};
 
-/* ESC KEY */
+$("successClose").onclick = () =>
+  $("successModal").classList.add("hidden");
 
-document.addEventListener(
-  "keydown",
-  event => {
+$("menuBtn").onclick = () =>
+  $("menu").classList.toggle("open");
 
-    if (event.key !== "Escape") return;
-
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
     closePreview();
-
-    closeDownloadModal();
-
-    hide(progressModal);
-
-    hide(successModal);
-
+    $("downloadModal").classList.add("hidden");
   }
-);
-
-
-/* CLICK OUTSIDE MODALS */
-
-document.addEventListener(
-  "click",
-  event => {
-
-    if (
-      event.target.classList.contains(
-        "modal-backdrop"
-      )
-    ) {
-
-      const modal =
-        event.target.closest(".modal");
-
-      if (modal) {
-        hide(modal);
-      }
-
-    }
-
-  }
-);
-
-
-/* INITIAL STATE */
-
-updateSelection();
-
+});
 </script>
 
 </body>
