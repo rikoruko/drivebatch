@@ -27,609 +27,1572 @@
 
 <section class="hero">
   <div class="badge">GOOGLE DRIVE VIDEO TOOL</div>
-  <h1>Download your videos.<br><span>Your way.</span></h1>
-  <p>Scan your Google Drive folders, preview your videos and download one or many at once.</p>
 
-  <a class="hero-connect" href="/login">Connect Google Drive →</a>
+  <h1>
+    Download your videos.<br>
+    <span>Your way.</span>
+  </h1>
+
+  <p>
+    Scan your Google Drive folders, preview your videos
+    and download one or many at once.
+  </p>
+
+  <a class="hero-connect" href="/login">
+    Connect Google Drive →
+  </a>
 </section>
+
 
 <section class="card scanner" id="scanner">
 
   <div class="section-title">
-    <div class="folder-icon">📁</div>
+
+    <div class="folder-icon">
+      📁
+    </div>
+
     <div>
       <h2>Scan a Drive folder</h2>
-      <p>Paste a Google Drive folder link below.</p>
+
+      <p>
+        Paste a Google Drive folder link below.
+      </p>
     </div>
+
   </div>
+
 
   <div class="input-row">
-    <input id="driveUrl"
+
+    <input
+      id="driveUrl"
       type="text"
       autocomplete="off"
-      placeholder="Paste your Google Drive folder link here...">
+      placeholder="Paste your Google Drive folder link here..."
+    >
 
-    <button class="primary" id="scanBtn">Scan Folder</button>
+    <button
+      class="primary"
+      id="scanBtn"
+    >
+      Scan Folder
+    </button>
+
   </div>
 
-  <div class="hint">Nested folders are scanned automatically.</div>
+
+  <div class="hint">
+    Nested folders are scanned automatically.
+  </div>
+
 </section>
 
-<section id="results" class="results hidden">
+
+<section
+  id="results"
+  class="results hidden"
+>
 
   <div class="results-head">
+
     <div>
-      <div class="eyebrow">SCAN RESULTS</div>
-      <h2>Your videos</h2>
-      <p id="folderStats">0 videos • 0 B</p>
+
+      <div class="eyebrow">
+        SCAN RESULTS
+      </div>
+
+      <h2>
+        Your videos
+      </h2>
+
+      <p id="folderStats">
+        0 videos • 0 B
+      </p>
+
     </div>
+
 
     <div class="buttons">
-      <button class="small" id="selectAll">Select all</button>
-      <button class="small" id="clearAll">Clear</button>
+
+      <button
+        class="small"
+        id="selectAll"
+      >
+        Select all
+      </button>
+
+      <button
+        class="small"
+        id="clearAll"
+      >
+        Clear
+      </button>
+
     </div>
+
   </div>
 
-  <input id="search" class="search" placeholder="Search videos...">
+
+  <input
+    id="search"
+    class="search"
+    placeholder="Search videos..."
+  >
+
 
   <div id="videoList"></div>
+
 </section>
 
-<section id="downloadBar" class="download-bar hidden">
+
+<section
+  id="downloadBar"
+  class="download-bar hidden"
+>
+
   <div>
-    <strong id="selectedCount">0 selected</strong>
-    <span id="selectedSize">0 B</span>
+
+    <strong id="selectedCount">
+      0 selected
+    </strong>
+
+    <span id="selectedSize">
+      0 B
+    </span>
+
   </div>
 
-  <button class="primary" id="downloadSelected">
+
+  <button
+    class="primary"
+    id="downloadSelected"
+  >
     Download Selected
   </button>
+
 </section>
 
-<section class="about" id="about">
-  <div class="card">
-    <h3>📂 Recursive scanning</h3>
-    <p>DriveBatch finds videos inside your folder and its nested folders.</p>
-  </div>
+
+<section
+  class="about"
+  id="about"
+>
 
   <div class="card">
-    <h3>⚡ Batch downloads</h3>
-    <p>Select multiple videos and download them individually or as one ZIP.</p>
+
+    <h3>
+      📂 Recursive scanning
+    </h3>
+
+    <p>
+      DriveBatch finds videos inside your folder
+      and its nested folders.
+    </p>
+
   </div>
+
+
+  <div class="card">
+
+    <h3>
+      ⚡ Batch downloads
+    </h3>
+
+    <p>
+      Select multiple videos and download them
+      individually or as one ZIP.
+    </p>
+
+  </div>
+
 </section>
 
 </main>
 
+
 <!-- PREVIEW -->
 
-<div class="modal hidden" id="previewModal">
+<div
+  class="modal hidden"
+  id="previewModal"
+>
+
   <div class="modal-box preview-box">
-    <button class="close" id="closePreview">×</button>
 
-    <div class="eyebrow">PREVIEW</div>
-    <h2 id="previewTitle">Video</h2>
+    <button
+      class="close"
+      id="closePreview"
+    >
+      ×
+    </button>
 
-    <video id="previewVideo" controls playsinline></video>
 
-    <button class="primary full" id="previewDownload">
+    <div class="eyebrow">
+      PREVIEW
+    </div>
+
+
+    <h2 id="previewTitle">
+      Video
+    </h2>
+
+
+    <video
+      id="previewVideo"
+      controls
+      playsinline
+    ></video>
+
+
+    <button
+      class="primary full"
+      id="previewDownload"
+    >
       Download Video
     </button>
+
   </div>
+
 </div>
+
 
 <!-- DOWNLOAD OPTIONS -->
 
-<div class="modal hidden" id="downloadModal">
-  <div class="modal-box">
-    <button class="close" id="closeDownload">×</button>
+<div
+  class="modal hidden"
+  id="downloadModal"
+>
 
-    <div class="eyebrow">DOWNLOAD</div>
-    <h2>Download selected videos</h2>
+  <div class="modal-box">
+
+    <button
+      class="close"
+      id="closeDownload"
+    >
+      ×
+    </button>
+
+
+    <div class="eyebrow">
+      DOWNLOAD
+    </div>
+
+
+    <h2>
+      Download selected videos
+    </h2>
+
+
     <p id="downloadInfo"></p>
 
-    <button class="primary full" id="zipBtn">
+
+    <button
+      class="primary full"
+      id="zipBtn"
+    >
       📦 Download as ZIP
     </button>
 
-    <button class="secondary full" id="individualBtn">
+
+    <button
+      class="secondary full"
+      id="individualBtn"
+    >
       ↓ Download individually
     </button>
+
   </div>
+
 </div>
+
 
 <!-- ZIP PROGRESS -->
 
-<div class="modal hidden" id="progressModal">
+<div
+  class="modal hidden"
+  id="progressModal"
+>
+
   <div class="modal-box">
-    <div class="eyebrow">BATCH DOWNLOAD</div>
-    <h2>Preparing your ZIP</h2>
 
-    <p id="progressText">Starting...</p>
-
-    <div class="progress">
-      <div id="progressFill"></div>
+    <div class="eyebrow">
+      BATCH DOWNLOAD
     </div>
 
-    <button class="secondary full" id="cancelBtn">
+
+    <h2>
+      Preparing your ZIP
+    </h2>
+
+
+    <p id="progressText">
+      Starting...
+    </p>
+
+
+    <div class="progress">
+
+      <div
+        id="progressFill"
+      ></div>
+
+    </div>
+
+
+    <button
+      class="secondary full"
+      id="cancelBtn"
+    >
       Cancel
     </button>
+
   </div>
+
 </div>
+
 
 <!-- SUCCESS -->
 
-<div class="modal hidden" id="successModal">
-  <div class="modal-box success-box">
-    <div class="success">✓</div>
-    <h2>ZIP ready!</h2>
-    <p>Your videos have been packed and are ready to download.</p>
+<div
+  class="modal hidden"
+  id="successModal"
+>
 
-    <button class="primary full" id="successDownload">
+  <div class="modal-box success-box">
+
+    <div class="success">
+      ✓
+    </div>
+
+
+    <h2>
+      ZIP ready!
+    </h2>
+
+
+    <p>
+      Your videos have been packed
+      and are ready to download.
+    </p>
+
+
+    <button
+      class="primary full"
+      id="successDownload"
+    >
       Download ZIP
     </button>
 
-    <button class="secondary full" id="successClose">
+
+    <button
+      class="secondary full"
+      id="successClose"
+    >
       Done
     </button>
+
   </div>
+
 </div>
 
+
 <script>
-const $ = id => document.getElementById(id);
+
+const $ = id =>
+  document.getElementById(id);
+
 
 let videos = [];
+
 let selected = new Set();
+
 let currentVideo = null;
+
 let currentJob = null;
+
 let jobFileUrl = null;
 
-const driveUrl = $("driveUrl");
-const results = $("results");
-const videoList = $("videoList");
-const downloadBar = $("downloadBar");
+
+const driveUrl =
+  $("driveUrl");
+
+const results =
+  $("results");
+
+const videoList =
+  $("videoList");
+
+const downloadBar =
+  $("downloadBar");
+
+
+/* -------------------------
+   FILE SIZE
+------------------------- */
 
 function bytes(n) {
+
   n = Number(n || 0);
 
-  if (!n) return "0 B";
-
-  const units = ["B","KB","MB","GB","TB"];
-  let i = 0;
-
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i++;
+  if (!n) {
+    return "0 B";
   }
 
-  return n.toFixed(i ? 1 : 0) + " " + units[i];
+  const units = [
+    "B",
+    "KB",
+    "MB",
+    "GB",
+    "TB"
+  ];
+
+  let i = 0;
+
+  while (
+    n >= 1024 &&
+    i < units.length - 1
+  ) {
+
+    n /= 1024;
+    i++;
+
+  }
+
+  return (
+    n.toFixed(i ? 1 : 0)
+    + " "
+    + units[i]
+  );
+
 }
+
+
+/* -------------------------
+   DRIVE URL
+------------------------- */
 
 function validDrive(url) {
-  return /^https?:\/\/(?:www\.)?(?:drive\.google\.com|docs\.google\.com)\//i.test(url);
+
+  return /^https?:\/\/(?:www\.)?(?:drive\.google\.com|docs\.google\.com)\//i
+    .test(url);
+
 }
+
+
+/* -------------------------
+   ESCAPE HTML
+------------------------- */
 
 function escapeHtml(value) {
-  return String(value || "").replace(/[&<>"']/g, c => ({
-    "&":"&amp;",
-    "<":"&lt;",
-    ">":"&gt;",
-    '"':"&quot;",
-    "'":"&#039;"
-  }[c]));
+
+  return String(value || "")
+    .replace(
+      /[&<>"']/g,
+      c => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[c])
+    );
+
 }
 
+
+/* -------------------------
+   SAFE JSON RESPONSE
+------------------------- */
+
+async function readJson(response) {
+
+  const text =
+    await response.text();
+
+  if (!text) {
+
+    throw new Error(
+      "The server returned an empty response. HTTP "
+      + response.status
+    );
+
+  }
+
+  try {
+
+    return JSON.parse(text);
+
+  } catch (error) {
+
+    console.error(
+      "Server response:",
+      text
+    );
+
+    throw new Error(
+      "Server returned an unexpected response. HTTP "
+      + response.status
+    );
+
+  }
+
+}
+
+
+/* -------------------------
+   SELECTION
+------------------------- */
+
 function updateSelection() {
+
   let size = 0;
 
-  videos.forEach(v => {
-    if (selected.has(String(v.id))) {
-      size += Number(v.size || 0);
+
+  videos.forEach(video => {
+
+    if (
+      selected.has(
+        String(video.id)
+      )
+    ) {
+
+      size += Number(
+        video.size || 0
+      );
+
     }
+
   });
 
-  $("selectedCount").textContent =
+
+  $("selectedCount")
+    .textContent =
     `${selected.size} selected`;
 
-  $("selectedSize").textContent =
+
+  $("selectedSize")
+    .textContent =
     bytes(size);
+
 
   downloadBar.classList.toggle(
     "hidden",
     selected.size === 0
   );
+
 }
+
+
+/* -------------------------
+   RENDER VIDEOS
+------------------------- */
 
 function renderVideos() {
-  const q = $("search").value.trim().toLowerCase();
 
-  const filtered = videos.filter(v =>
-    String(v.name || "").toLowerCase().includes(q)
-  );
+  const q =
+    $("search")
+      .value
+      .trim()
+      .toLowerCase();
 
-  videoList.innerHTML = filtered.map(v => {
-    const id = String(v.id);
 
-    return `
-      <article class="video-card">
-
-        <input
-          class="video-check"
-          type="checkbox"
-          ${selected.has(id) ? "checked" : ""}
-          onchange="toggleVideo('${escapeHtml(id)}')">
-
-        <button
-          class="preview-button"
-          onclick="openPreview('${escapeHtml(id)}')">
-          ▶
-        </button>
-
-        <div class="video-info">
-          <h3>${escapeHtml(v.name)}</h3>
-          <p>${escapeHtml(v.path || "Google Drive")}</p>
-          <small>${bytes(v.size)}</small>
-        </div>
-
-        <button
-          class="download-button"
-          onclick="downloadSingle('${escapeHtml(id)}')">
-          ↓
-        </button>
-
-      </article>
-    `;
-  }).join("");
-
-  updateSelection();
-}
-
-function toggleVideo(id) {
-  id = String(id);
-
-  if (selected.has(id)) {
-    selected.delete(id);
-  } else {
-    selected.add(id);
-  }
-
-  renderVideos();
-}
-
-async function scan() {
-  const url = driveUrl.value.trim();
-
-  if (!validDrive(url)) {
-    alert("Please paste a valid Google Drive folder link.");
-    return;
-  }
-
-  $("scanBtn").disabled = true;
-  $("scanBtn").textContent = "Scanning...";
-
-  try {
-    const response = await fetch("/api/scan", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ url })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || "Scan failed.");
-    }
-
-    videos = data.videos || [];
-    selected.clear();
-
-    const total = videos.reduce(
-      (sum, v) => sum + Number(v.size || 0),
-      0
+  const filtered =
+    videos.filter(video =>
+      String(
+        video.name || ""
+      )
+      .toLowerCase()
+      .includes(q)
     );
 
-    $("folderStats").textContent =
+
+  if (!filtered.length) {
+
+    videoList.innerHTML = `
+      <div class="card">
+        <p>No videos found.</p>
+      </div>
+    `;
+
+    updateSelection();
+
+    return;
+
+  }
+
+
+  videoList.innerHTML =
+    filtered.map(video => {
+
+      const id =
+        String(video.id);
+
+
+      return `
+        <article class="video-card">
+
+          <input
+            class="video-check"
+            type="checkbox"
+            ${selected.has(id) ? "checked" : ""}
+            onchange="toggleVideo('${escapeHtml(id)}')"
+          >
+
+
+          <button
+            class="preview-button"
+            onclick="openPreview('${escapeHtml(id)}')"
+          >
+            ▶
+          </button>
+
+
+          <div class="video-info">
+
+            <h3>
+              ${escapeHtml(video.name)}
+            </h3>
+
+            <p>
+              ${escapeHtml(
+                video.path ||
+                "Google Drive"
+              )}
+            </p>
+
+            <small>
+              ${bytes(video.size)}
+            </small>
+
+          </div>
+
+
+          <button
+            class="download-button"
+            onclick="downloadSingle('${escapeHtml(id)}')"
+          >
+            ↓
+          </button>
+
+        </article>
+      `;
+
+    }).join("");
+
+
+  updateSelection();
+
+}
+
+
+/* -------------------------
+   TOGGLE VIDEO
+------------------------- */
+
+function toggleVideo(id) {
+
+  id = String(id);
+
+
+  if (
+    selected.has(id)
+  ) {
+
+    selected.delete(id);
+
+  } else {
+
+    selected.add(id);
+
+  }
+
+
+  renderVideos();
+
+}
+
+
+/* -------------------------
+   SCAN
+------------------------- */
+
+async function scan() {
+
+  const url =
+    driveUrl.value.trim();
+
+
+  if (!validDrive(url)) {
+
+    alert(
+      "Please paste a valid Google Drive folder link."
+    );
+
+    return;
+
+  }
+
+
+  $("scanBtn").disabled = true;
+
+  $("scanBtn").textContent =
+    "Scanning...";
+
+
+  try {
+
+    const response =
+      await fetch(
+        "/api/scan",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body: JSON.stringify({
+            url: url
+          })
+        }
+      );
+
+
+    const data =
+      await readJson(response);
+
+
+    if (!response.ok) {
+
+      throw new Error(
+        data.error ||
+        "Scan failed."
+      );
+
+    }
+
+
+    videos =
+      data.videos || [];
+
+
+    selected.clear();
+
+
+    const total =
+      videos.reduce(
+        (sum, video) =>
+          sum +
+          Number(
+            video.size || 0
+          ),
+        0
+      );
+
+
+    $("folderStats")
+      .textContent =
       `${videos.length} videos • ${bytes(total)}`;
 
-    results.classList.remove("hidden");
+
+    results.classList.remove(
+      "hidden"
+    );
+
 
     renderVideos();
+
 
     results.scrollIntoView({
       behavior: "smooth",
       block: "start"
     });
 
+
   } catch (error) {
-    alert(error.message);
+
+    alert(
+      error.message ||
+      "Scan failed."
+    );
+
   }
+
 
   $("scanBtn").disabled = false;
-  $("scanBtn").textContent = "Scan Folder";
+
+  $("scanBtn").textContent =
+    "Scan Folder";
+
 }
+
+
+/* -------------------------
+   PREVIEW
+------------------------- */
 
 function openPreview(id) {
-  const video = videos.find(v => String(v.id) === String(id));
 
-  if (!video) return;
+  const video =
+    videos.find(
+      v =>
+        String(v.id) ===
+        String(id)
+    );
 
-  currentVideo = video;
 
-  $("previewTitle").textContent =
-    video.name || "Video";
+  if (!video) {
+    return;
+  }
 
-  $("previewVideo").src =
-    "/api/preview/" + encodeURIComponent(id);
 
-  $("previewModal").classList.remove("hidden");
+  currentVideo =
+    video;
+
+
+  $("previewTitle")
+    .textContent =
+    video.name ||
+    "Video";
+
+
+  $("previewVideo")
+    .src =
+    "/api/preview/" +
+    encodeURIComponent(id);
+
+
+  $("previewModal")
+    .classList.remove(
+      "hidden"
+    );
+
 }
+
+
+/* -------------------------
+   CLOSE PREVIEW
+------------------------- */
 
 function closePreview() {
-  $("previewVideo").pause();
-  $("previewVideo").removeAttribute("src");
-  $("previewVideo").load();
 
-  $("previewModal").classList.add("hidden");
+  const player =
+    $("previewVideo");
+
+
+  player.pause();
+
+  player.removeAttribute(
+    "src"
+  );
+
+  player.load();
+
+
+  $("previewModal")
+    .classList.add(
+      "hidden"
+    );
+
 }
+
+
+/* -------------------------
+   SINGLE DOWNLOAD
+------------------------- */
 
 function downloadSingle(id) {
+
   const url =
-    "/api/video/" + encodeURIComponent(id);
+    "/api/video/" +
+    encodeURIComponent(id);
 
-  const frame = document.createElement("iframe");
 
-  frame.style.display = "none";
-  frame.src = url;
+  const link =
+    document.createElement("a");
 
-  document.body.appendChild(frame);
 
-  setTimeout(() => frame.remove(), 60000);
+  link.href = url;
+
+  link.target = "_blank";
+
+  link.rel = "noopener";
+
+
+  document.body.appendChild(
+    link
+  );
+
+
+  link.click();
+
+
+  link.remove();
+
 }
 
-$("scanBtn").onclick = scan;
 
-driveUrl.addEventListener("keydown", e => {
-  if (e.key === "Enter") scan();
-});
+/* -------------------------
+   SCAN BUTTON
+------------------------- */
 
-$("search").oninput = renderVideos;
+$("scanBtn").onclick =
+  scan;
 
-$("selectAll").onclick = () => {
-  videos.forEach(v => selected.add(String(v.id)));
-  renderVideos();
-};
 
-$("clearAll").onclick = () => {
-  selected.clear();
-  renderVideos();
-};
+driveUrl.addEventListener(
+  "keydown",
+  event => {
 
-$("closePreview").onclick = closePreview;
+    if (
+      event.key === "Enter"
+    ) {
 
-$("previewDownload").onclick = () => {
-  if (currentVideo) {
-    downloadSingle(currentVideo.id);
+      scan();
+
+    }
+
   }
-};
+);
 
-$("downloadSelected").onclick = () => {
-  if (!selected.size) return;
 
-  $("downloadInfo").textContent =
-    `${selected.size} video${selected.size === 1 ? "" : "s"} selected.`;
+/* -------------------------
+   SEARCH
+------------------------- */
 
-  $("downloadModal").classList.remove("hidden");
-};
+$("search").oninput =
+  renderVideos;
 
-$("closeDownload").onclick = () => {
-  $("downloadModal").classList.add("hidden");
-};
 
-/*
-  INDIVIDUAL DOWNLOADS
+/* -------------------------
+   SELECT ALL
+------------------------- */
 
-  Hidden iframes allow the browser to start
-  separate downloads without navigating away.
-*/
+$("selectAll").onclick =
+  () => {
 
-$("individualBtn").onclick = async () => {
-  $("downloadModal").classList.add("hidden");
-
-  const ids = [...selected];
-
-  for (const id of ids) {
-    downloadSingle(id);
-
-    await new Promise(resolve =>
-      setTimeout(resolve, 1800)
-    );
-  }
-};
-
-/*
-  START ZIP
-*/
-
-$("zipBtn").onclick = async () => {
-  $("downloadModal").classList.add("hidden");
-  $("progressModal").classList.remove("hidden");
-
-  $("progressText").textContent =
-    "Starting ZIP...";
-
-  $("progressFill").style.width = "0%";
-
-  try {
-    const response = await fetch(
-      "/api/download/start",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          file_ids: [...selected]
-        })
-      }
+    videos.forEach(
+      video =>
+        selected.add(
+          String(video.id)
+        )
     );
 
-    const data = await response.json();
 
-    if (!response.ok) {
-      throw new Error(
-        data.error || "Could not start ZIP download."
+    renderVideos();
+
+  };
+
+
+/* -------------------------
+   CLEAR ALL
+------------------------- */
+
+$("clearAll").onclick =
+  () => {
+
+    selected.clear();
+
+    renderVideos();
+
+  };
+
+
+/* -------------------------
+   PREVIEW CLOSE
+------------------------- */
+
+$("closePreview").onclick =
+  closePreview;
+
+
+/* -------------------------
+   PREVIEW DOWNLOAD
+------------------------- */
+
+$("previewDownload").onclick =
+  () => {
+
+    if (currentVideo) {
+
+      downloadSingle(
+        currentVideo.id
       );
+
     }
 
-    currentJob =
-      data.job_id ||
-      data.jobId ||
-      data.id;
+  };
 
-    if (!currentJob) {
-      throw new Error("The server did not return a download job.");
+
+/* -------------------------
+   OPEN DOWNLOAD OPTIONS
+------------------------- */
+
+$("downloadSelected").onclick =
+  () => {
+
+    if (!selected.size) {
+      return;
     }
 
-    pollJob();
 
-  } catch (error) {
-    $("progressModal").classList.add("hidden");
-    alert(error.message);
-  }
-};
+    $("downloadInfo")
+      .textContent =
+      `${selected.size} video${
+        selected.size === 1
+          ? ""
+          : "s"
+      } selected.`;
 
-/*
-  ZIP PROGRESS
-*/
+
+    $("downloadModal")
+      .classList.remove(
+        "hidden"
+      );
+
+  };
+
+
+/* -------------------------
+   CLOSE DOWNLOAD OPTIONS
+------------------------- */
+
+$("closeDownload").onclick =
+  () => {
+
+    $("downloadModal")
+      .classList.add(
+        "hidden"
+      );
+
+  };
+
+
+/* -------------------------
+   INDIVIDUAL DOWNLOADS
+------------------------- */
+
+$("individualBtn").onclick =
+  async () => {
+
+    $("downloadModal")
+      .classList.add(
+        "hidden"
+      );
+
+
+    const ids =
+      [...selected];
+
+
+    for (
+      const id of ids
+    ) {
+
+      downloadSingle(id);
+
+
+      await new Promise(
+        resolve =>
+          setTimeout(
+            resolve,
+            1800
+          )
+      );
+
+    }
+
+  };
+
+
+/* -------------------------
+   START ZIP
+------------------------- */
+
+$("zipBtn").onclick =
+  async () => {
+
+    $("downloadModal")
+      .classList.add(
+        "hidden"
+      );
+
+
+    $("progressModal")
+      .classList.remove(
+        "hidden"
+      );
+
+
+    $("progressText")
+      .textContent =
+      "Starting ZIP...";
+
+
+    $("progressFill")
+      .style.width =
+      "0%";
+
+
+    currentJob = null;
+
+    jobFileUrl = null;
+
+
+    try {
+
+      const ids =
+        [...selected];
+
+
+      if (!ids.length) {
+
+        throw new Error(
+          "No videos were selected."
+        );
+
+      }
+
+
+      const response =
+        await fetch(
+          "/api/download/start",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body: JSON.stringify({
+              file_ids: ids
+            })
+          }
+        );
+
+
+      const data =
+        await readJson(
+          response
+        );
+
+
+      if (!response.ok) {
+
+        throw new Error(
+          data.error ||
+          "Could not start ZIP download."
+        );
+
+      }
+
+
+      currentJob =
+        data.job_id ||
+        data.jobId ||
+        data.id;
+
+
+      if (!currentJob) {
+
+        throw new Error(
+          "The server did not return a download job."
+        );
+
+      }
+
+
+      pollJob();
+
+
+    } catch (error) {
+
+      $("progressModal")
+        .classList.add(
+          "hidden"
+        );
+
+
+      alert(
+        error.message ||
+        "Could not start ZIP download."
+      );
+
+    }
+
+  };
+
+
+/* -------------------------
+   ZIP PROGRESS
+------------------------- */
 
 async function pollJob() {
-  if (!currentJob) return;
+
+  if (!currentJob) {
+    return;
+  }
+
 
   try {
-    const response = await fetch(
-      "/api/download/status/" +
-      encodeURIComponent(currentJob),
-      { cache: "no-store" }
-    );
 
-    const data = await response.json();
+    const response =
+      await fetch(
+        "/api/download/status/" +
+        encodeURIComponent(
+          currentJob
+        ),
+        {
+          cache: "no-store"
+        }
+      );
+
+
+    const data =
+      await readJson(
+        response
+      );
+
 
     if (!response.ok) {
+
       throw new Error(
-        data.error || "Could not check ZIP progress."
+        data.error ||
+        "Could not check ZIP progress."
       );
+
     }
 
+
     const progress =
-      Number(data.progress || 0);
+      Number(
+        data.progress || 0
+      );
 
-    $("progressFill").style.width =
-      Math.max(0, Math.min(100, progress)) + "%";
 
-    $("progressText").textContent =
+    $("progressFill")
+      .style.width =
+      Math.max(
+        0,
+        Math.min(
+          100,
+          progress
+        )
+      ) + "%";
+
+
+    $("progressText")
+      .textContent =
       data.message ||
-      `${data.completed || 0} / ${data.total || 0} videos`;
+      `${data.completed || 0} / ${
+        data.total || 0
+      } videos`;
+
 
     if (
       data.status === "done" ||
       data.status === "completed" ||
       data.ready === true
     ) {
+
       jobFileUrl =
         "/api/download/file/" +
-        encodeURIComponent(currentJob);
+        encodeURIComponent(
+          currentJob
+        );
 
-      $("progressModal").classList.add("hidden");
-      $("successModal").classList.remove("hidden");
+
+      $("progressModal")
+        .classList.add(
+          "hidden"
+        );
+
+
+      $("successModal")
+        .classList.remove(
+          "hidden"
+        );
+
 
       return;
+
     }
+
 
     if (
       data.status === "error" ||
       data.status === "failed"
     ) {
+
       throw new Error(
-        data.error || "ZIP creation failed."
+        data.error ||
+        "ZIP creation failed."
       );
+
     }
+
 
     if (
       data.status === "cancelled"
     ) {
-      $("progressModal").classList.add("hidden");
+
+      $("progressModal")
+        .classList.add(
+          "hidden"
+        );
+
+      return;
+
+    }
+
+
+    setTimeout(
+      pollJob,
+      800
+    );
+
+
+  } catch (error) {
+
+    $("progressModal")
+      .classList.add(
+        "hidden"
+      );
+
+
+    alert(
+      error.message ||
+      "Could not check ZIP progress."
+    );
+
+  }
+
+}
+
+
+/* -------------------------
+   DOWNLOAD FINISHED ZIP
+------------------------- */
+
+$("successDownload").onclick =
+  () => {
+
+    if (!jobFileUrl) {
       return;
     }
 
-    setTimeout(pollJob, 800);
 
-  } catch (error) {
-    $("progressModal").classList.add("hidden");
-    alert(error.message);
-  }
-}
+    const link =
+      document.createElement("a");
 
-/*
-  DOWNLOAD FINISHED ZIP
-*/
 
-$("successDownload").onclick = () => {
-  if (!jobFileUrl) return;
+    link.href =
+      jobFileUrl;
 
-  const frame = document.createElement("iframe");
 
-  frame.style.display = "none";
-  frame.src = jobFileUrl;
+    link.target =
+      "_blank";
 
-  document.body.appendChild(frame);
 
-  setTimeout(() => frame.remove(), 60000);
-};
+    link.rel =
+      "noopener";
 
-$("successClose").onclick = () => {
-  $("successModal").classList.add("hidden");
-};
 
-$("cancelBtn").onclick = async () => {
-  if (!currentJob) return;
-
-  try {
-    await fetch(
-      "/api/download/cancel/" +
-      encodeURIComponent(currentJob),
-      { method: "POST" }
+    document.body.appendChild(
+      link
     );
-  } catch (e) {}
 
-  $("progressModal").classList.add("hidden");
 
-  currentJob = null;
-};
+    link.click();
 
-$("menuBtn").onclick = () => {
-  $("menu").classList.toggle("open");
-};
 
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape") {
-    closePreview();
-    $("downloadModal").classList.add("hidden");
-    $("progressModal").classList.add("hidden");
+    link.remove();
+
+  };
+
+
+/* -------------------------
+   CLOSE SUCCESS
+------------------------- */
+
+$("successClose").onclick =
+  () => {
+
+    $("successModal")
+      .classList.add(
+        "hidden"
+      );
+
+  };
+
+
+/* -------------------------
+   CANCEL ZIP
+------------------------- */
+
+$("cancelBtn").onclick =
+  async () => {
+
+    if (!currentJob) {
+
+      $("progressModal")
+        .classList.add(
+          "hidden"
+        );
+
+      return;
+
+    }
+
+
+    try {
+
+      await fetch(
+        "/api/download/cancel/" +
+        encodeURIComponent(
+          currentJob
+        ),
+        {
+          method: "POST"
+        }
+      );
+
+    } catch (error) {
+
+      console.error(
+        error
+      );
+
+    }
+
+
+    $("progressModal")
+      .classList.add(
+        "hidden"
+      );
+
+
+    currentJob =
+      null;
+
+  };
+
+
+/* -------------------------
+   MENU
+------------------------- */
+
+$("menuBtn").onclick =
+  () => {
+
+    $("menu")
+      .classList.toggle(
+        "open"
+      );
+
+  };
+
+
+/* -------------------------
+   ESCAPE KEY
+------------------------- */
+
+document.addEventListener(
+  "keydown",
+  event => {
+
+    if (
+      event.key === "Escape"
+    ) {
+
+      closePreview();
+
+      $("downloadModal")
+        .classList.add(
+          "hidden"
+        );
+
+      $("progressModal")
+        .classList.add(
+          "hidden"
+        );
+
+      $("successModal")
+        .classList.add(
+          "hidden"
+        );
+
+    }
+
   }
-});
+);
 
-$("previewModal").addEventListener("click", e => {
-  if (e.target === $("previewModal")) {
-    closePreview();
-  }
-});
 
-$("downloadModal").addEventListener("click", e => {
-  if (e.target === $("downloadModal")) {
-    $("downloadModal").classList.add("hidden");
-  }
-});
+/* -------------------------
+   MODAL BACKDROPS
+------------------------- */
+
+$("previewModal")
+  .addEventListener(
+    "click",
+    event => {
+
+      if (
+        event.target ===
+        $("previewModal")
+      ) {
+
+        closePreview();
+
+      }
+
+    }
+  );
+
+
+$("downloadModal")
+  .addEventListener(
+    "click",
+    event => {
+
+      if (
+        event.target ===
+        $("downloadModal")
+      ) {
+
+        $("downloadModal")
+          .classList.add(
+            "hidden"
+          );
+
+      }
+
+    }
+  );
+
+
+$("successModal")
+  .addEventListener(
+    "click",
+    event => {
+
+      if (
+        event.target ===
+        $("successModal")
+      ) {
+
+        $("successModal")
+          .classList.add(
+            "hidden"
+          );
+
+      }
+
+    }
+  );
 
 </script>
 
