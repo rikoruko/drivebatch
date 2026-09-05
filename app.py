@@ -29,7 +29,9 @@ from googleapiclient.http import MediaIoBaseDownload
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-me")
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.readonly"
+]
 
 VIDEO_MIMES = {
     "video/mp4",
@@ -107,9 +109,7 @@ def cleanup_old_jobs():
     with JOBS_LOCK:
         for job_id, job in list(DOWNLOAD_JOBS.items()):
             if now - job.get("created", now) > 3600:
-                old_jobs.append(
-                    DOWNLOAD_JOBS.pop(job_id)
-                )
+                old_jobs.append(DOWNLOAD_JOBS.pop(job_id))
 
     for job in old_jobs:
         temp_dir = job.get("temp_dir")
@@ -128,15 +128,11 @@ def is_cancel_requested(job_id):
         if not job:
             return True
 
-        return bool(
-            job.get("cancel_requested")
-        )
+        return bool(job.get("cancel_requested"))
 
 
 def client_config():
-    raw = os.environ.get(
-        "GOOGLE_CLIENT_SECRET_JSON"
-    )
+    raw = os.environ.get("GOOGLE_CLIENT_SECRET_JSON")
 
     if raw:
         return json.loads(raw)
@@ -144,12 +140,8 @@ def client_config():
     path = "client_secret.json"
 
     if os.path.exists(path):
-        with open(
-            path,
-            "r",
-            encoding="utf-8",
-        ) as f:
-            return json.load(f)
+        with open(path, "r", encoding="utf-8") as file:
+            return json.load(file)
 
     raise RuntimeError(
         "Google OAuth credentials are not configured."
@@ -157,27 +149,17 @@ def client_config():
 
 
 def redirect_uri():
-    configured = os.environ.get(
-        "OAUTH_REDIRECT_URI"
-    )
+    configured = os.environ.get("OAUTH_REDIRECT_URI")
 
     if configured:
         return configured
 
-    render_url = os.environ.get(
-        "RENDER_EXTERNAL_URL"
-    )
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
 
     if render_url:
-        return (
-            render_url.rstrip("/")
-            + "/oauth2callback"
-        )
+        return render_url.rstrip("/") + "/oauth2callback"
 
-    return (
-        "http://localhost:5000/"
-        "oauth2callback"
-    )
+    return "http://localhost:5000/oauth2callback"
 
 
 def make_flow(state=None):
@@ -199,21 +181,11 @@ def build_drive_service(credentials_data):
 
     credentials = Credentials(
         token=credentials_data.get("token"),
-        refresh_token=credentials_data.get(
-            "refresh_token"
-        ),
-        token_uri=credentials_data.get(
-            "token_uri"
-        ),
-        client_id=credentials_data.get(
-            "client_id"
-        ),
-        client_secret=credentials_data.get(
-            "client_secret"
-        ),
-        scopes=credentials_data.get(
-            "scopes"
-        ),
+        refresh_token=credentials_data.get("refresh_token"),
+        token_uri=credentials_data.get("token_uri"),
+        client_id=credentials_data.get("client_id"),
+        client_secret=credentials_data.get("client_secret"),
+        scopes=credentials_data.get("scopes"),
     )
 
     return build(
@@ -266,8 +238,8 @@ def is_video(file):
         return True
 
     return any(
-        name.endswith(ext)
-        for ext in VIDEO_EXTENSIONS
+        name.endswith(extension)
+        for extension in VIDEO_EXTENSIONS
     )
 
 
@@ -289,8 +261,8 @@ def format_size(size):
         if value < 1024:
             return f"{value:.1f} {unit}"
 
-        if unit == units[-1]:
-            return f"{value:.1f} {unit}"
+        if unit == "TB":
+            return f"{value:.1f} TB"
 
         value /= 1024
 
@@ -333,11 +305,7 @@ def list_children(service, folder_id):
     return results
 
 
-def scan_folder(
-    service,
-    folder_id,
-    path="",
-):
+def scan_folder(service, folder_id, path=""):
     videos = []
 
     for item in list_children(
@@ -346,8 +314,7 @@ def scan_folder(
     ):
         item_path = (
             f"{path}/{item['name']}"
-            .strip("/")
-        )
+        ).strip("/")
 
         if (
             item.get("mimeType")
@@ -414,9 +381,7 @@ def login():
 
 @app.route("/oauth2callback")
 def oauth2callback():
-    state = session.get(
-        "oauth_state"
-    )
+    state = session.get("oauth_state")
 
     flow = make_flow(state)
 
@@ -463,9 +428,7 @@ def scan():
 
     if not service:
         return jsonify({
-            "error": (
-                "Connect Google Drive first."
-            )
+            "error": "Connect Google Drive first."
         }), 401
 
     data = (
@@ -592,7 +555,6 @@ def build_zip_job(
             for index, file_id in enumerate(
                 video_ids
             ):
-
                 if is_cancel_requested(
                     job_id
                 ):
@@ -609,9 +571,7 @@ def build_zip_job(
 
                 metadata = service.files().get(
                     fileId=file_id,
-                    fields=(
-                        "id,name,mimeType"
-                    ),
+                    fields="id,name,mimeType",
                     supportsAllDrives=True,
                 ).execute()
 
@@ -621,14 +581,14 @@ def build_zip_job(
                 )
 
                 if filename in used_names:
-                    base, ext = os.path.splitext(
-                        filename
+                    base, extension = (
+                        os.path.splitext(filename)
                     )
 
                     filename = (
                         f"{base}-"
                         f"{index + 1}"
-                        f"{ext}"
+                        f"{extension}"
                     )
 
                 used_names.add(filename)
@@ -677,7 +637,6 @@ def build_zip_job(
                     done = False
 
                     while not done:
-
                         if is_cancel_requested(
                             job_id
                         ):
@@ -782,7 +741,6 @@ def build_zip_job(
         )
 
     except Exception as exc:
-
         try:
             temp_dir.cleanup()
         except Exception:
@@ -932,4 +890,203 @@ def download_file(job_id):
 
     if job.get("status") != "ready":
         return jsonify({
-    
+            "error": (
+                "The ZIP is not ready yet."
+            )
+        }), 400
+
+    path = job.get("path")
+
+    if (
+        not path
+        or not os.path.exists(path)
+    ):
+        return jsonify({
+            "error": (
+                "The ZIP file is no longer "
+                "available."
+            )
+        }), 404
+
+    return send_file(
+        path,
+        mimetype="application/zip",
+          as_attachment=True,
+        download_name="drivebatch-videos.zip",
+    )
+
+
+@app.route(
+    "/api/download/cancel/<job_id>",
+    methods=["POST"],
+)
+def cancel_download(job_id):
+    job = get_job(job_id)
+
+    if not job:
+        return jsonify({
+            "error": "Download job not found."
+        }), 404
+
+    if job.get("status") == "ready":
+        return jsonify({
+            "error": "This download is already ready."
+        }), 400
+
+    update_job(
+        job_id,
+        cancel_requested=True,
+        message="Cancelling...",
+    )
+
+    return jsonify({
+        "success": True
+    })
+
+
+@app.route("/api/video/<file_id>")
+def download_video(file_id):
+    service = drive_service()
+
+    if not service:
+        return jsonify({
+            "error": "Connect Google Drive first."
+        }), 401
+
+    temp_dir = None
+
+    try:
+        metadata = service.files().get(
+            fileId=file_id,
+            fields="id,name,mimeType,size",
+            supportsAllDrives=True,
+        ).execute()
+
+        filename = metadata.get(
+            "name",
+            "drivebatch-video",
+        )
+
+        mime_type = metadata.get(
+            "mimeType",
+            "application/octet-stream",
+        )
+
+        request_media = service.files().get_media(
+            fileId=file_id,
+            supportsAllDrives=True,
+        )
+
+        temp_dir = TemporaryDirectory()
+
+        local_path = os.path.join(
+            temp_dir.name,
+            filename,
+        )
+
+        with open(local_path, "wb") as output:
+            downloader = MediaIoBaseDownload(
+                output,
+                request_media,
+                chunksize=4 * 1024 * 1024,
+            )
+
+            done = False
+
+            while not done:
+                _, done = downloader.next_chunk()
+
+        response = send_file(
+            local_path,
+            mimetype=mime_type,
+            as_attachment=True,
+            download_name=filename,
+        )
+
+        @response.call_on_close
+        def cleanup():
+            try:
+                temp_dir.cleanup()
+            except Exception:
+                pass
+
+        return response
+
+    except Exception as exc:
+        if temp_dir:
+            try:
+                temp_dir.cleanup()
+            except Exception:
+                pass
+
+        return jsonify({
+            "error": f"Video download failed: {exc}"
+        }), 500
+
+
+@app.route("/api/preview/<file_id>")
+def preview_video(file_id):
+    service = drive_service()
+
+    if not service:
+        return jsonify({
+            "error": "Connect Google Drive first."
+        }), 401
+
+    try:
+        metadata = service.files().get(
+            fileId=file_id,
+            fields="name,mimeType",
+            supportsAllDrives=True,
+        ).execute()
+
+        mime_type = metadata.get(
+            "mimeType",
+            "video/mp4",
+        )
+
+        request_media = service.files().get_media(
+            fileId=file_id,
+            supportsAllDrives=True,
+        )
+
+        data = io.BytesIO()
+
+        downloader = MediaIoBaseDownload(
+            data,
+            request_media,
+            chunksize=4 * 1024 * 1024,
+        )
+
+        done = False
+
+        while not done:
+            _, done = downloader.next_chunk()
+
+        data.seek(0)
+
+        return Response(
+            data.read(),
+            mimetype=mime_type,
+            headers={
+                "Content-Disposition": "inline"
+            },
+        )
+
+    except Exception as exc:
+        return jsonify({
+            "error": f"Preview failed: {exc}"
+        }), 500
+
+
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.environ.get(
+                "PORT",
+                5000,
+            )
+        ),
+        debug=False,
+)
