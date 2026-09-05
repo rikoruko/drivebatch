@@ -1,10 +1,23 @@
 import io
 import os
 import re
+import uuid
 import zipfile
+import threading
+import time
 from tempfile import TemporaryDirectory
 
-from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import (
+    Flask,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+    Response,
+)
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -25,6 +38,7 @@ VIDEO_MIMES = {
     "video/ogg",
     "video/3gpp",
     "video/x-flv",
+    "video/x-ms-wmv",
 }
 
 VIDEO_EXTENSIONS = {
@@ -32,6 +46,72 @@ VIDEO_EXTENSIONS = {
     ".mpeg", ".mpg", ".ogv", ".3gp", ".flv", ".wmv"
 }
 
+# -------------------------------------------------------------------
+# Background download jobs
+# -------------------------------------------------------------------
+
+DOWNLOAD_JOBS = {}
+JOBS_LOCK = threading.Lock()
+
+
+def create_job():
+    job_id = uuid.uuid4().hex
+
+    with JOBS_LOCK:
+        DOWNLOAD_JOBS[job_id] = {
+            "status": "starting",
+            "progress": 0,
+            "current": 0,
+            "total": 0,
+            "current_name": "",
+            "message": "Starting download...",
+            "path": None,
+            "error": None,
+            "created": time.time(),
+        }
+
+    return job_id
+
+
+def update_job(job_id, **values):
+    with JOBS_LOCK:
+        if job_id in DOWNLOAD_JOBS:
+            DOWNLOAD_JOBS[job_id].update(values)
+
+
+def get_job(job_id):
+    with JOBS_LOCK:
+        job = DOWNLOAD_JOBS.get(job_id)
+
+        if not job:
+            return None
+
+        return dict(job)
+
+
+def cleanup_old_jobs():
+    now = time.time()
+
+    with JOBS_LOCK:
+        old_ids = []
+
+        for job_id, job in DOWNLOAD_JOBS.items():
+            if now - job.get("created", now) > 3600:
+                old_ids.append(job_id)
+
+        for job_id in old_ids:
+            job = DOWNLOAD_JOBS.pop(job_id, None)
+
+            if job and job.get("path"):
+                try:
+                    os.remove(job["path"])
+                except OSError:
+                    pass
+
+
+# -------------------------------------------------------------------
+# Google configuration
+# -------------------------------------------------------------------
 
 def client_config():
     raw = os.environ.get("GOOGLE_CLIENT_SECRET_JSON")
@@ -41,8 +121,10 @@ def client_config():
         return json.loads(raw)
 
     path = "client_secret.json"
+
     if os.path.exists(path):
         import json
+
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
@@ -51,10 +133,12 @@ def client_config():
 
 def redirect_uri():
     configured = os.environ.get("OAUTH_REDIRECT_URI")
+
     if configured:
         return configured
 
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
+
     if render_url:
         return render_url.rstrip("/") + "/oauth2callback"
 
@@ -89,17 +173,28 @@ def drive_service():
         scopes=data.get("scopes"),
     )
 
-    return build("drive", "v3", credentials=credentials, cache_discovery=False)
+    return build(
+        "drive",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
 
+
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
 
 def extract_folder_id(value):
     value = (value or "").strip()
 
     match = re.search(r"/folders/([a-zA-Z0-9_-]+)", value)
+
     if match:
         return match.group(1)
 
     match = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", value)
+
     if match:
         return match.group(1)
 
@@ -128,9 +223,11 @@ def format_size(size):
     units = ["B", "KB", "MB", "GB", "TB"]
 
     value = float(size)
+
     for unit in units:
         if value < 1024 or unit == units[-1]:
             return f"{value:.1f} {unit}"
+
         value /= 1024
 
     return "Unknown size"
@@ -143,7 +240,7 @@ def list_children(service, folder_id):
     while True:
         response = service.files().list(
             q=f"'{folder_id}' in parents and trashed = false",
-            fields="nextPageToken, files(id,name,mimeType,size)",
+            fields="nextPageToken, files(id,name,mimeType,size,videoMediaMetadata)",
             pageSize=1000,
             pageToken=page_token,
             orderBy="name",
@@ -169,7 +266,11 @@ def scan_folder(service, folder_id, path=""):
 
         if item.get("mimeType") == "application/vnd.google-apps.folder":
             videos.extend(
-                scan_folder(service, item["id"], item_path)
+                scan_folder(
+                    service,
+                    item["id"],
+                    item_path,
+                )
             )
 
         elif is_video(item):
@@ -179,16 +280,21 @@ def scan_folder(service, folder_id, path=""):
                 "path": item_path,
                 "size": int(item.get("size", 0) or 0),
                 "size_display": format_size(item.get("size")),
+                "mimeType": item.get("mimeType", ""),
             })
 
     return videos
 
 
+# -------------------------------------------------------------------
+# Pages / authentication
+# -------------------------------------------------------------------
+
 @app.route("/")
 def index():
     return render_template(
         "index.html",
-        connected=bool(session.get("google_credentials"))
+        connected=bool(session.get("google_credentials")),
     )
 
 
@@ -213,7 +319,9 @@ def oauth2callback():
 
     flow = make_flow(state)
 
-    flow.fetch_token(authorization_response=request.url)
+    flow.fetch_token(
+        authorization_response=request.url
+    )
 
     credentials = flow.credentials
 
@@ -234,8 +342,13 @@ def oauth2callback():
 @app.route("/logout")
 def logout():
     session.clear()
+
     return redirect(url_for("index"))
 
+
+# -------------------------------------------------------------------
+# Scan
+# -------------------------------------------------------------------
 
 @app.route("/api/scan", methods=["POST"])
 def scan():
@@ -268,12 +381,25 @@ def scan():
                 "error": "That link does not point to a Google Drive folder."
             }), 400
 
-        videos = scan_folder(service, folder_id)
+        videos = scan_folder(
+            service,
+            folder_id,
+        )
+
+        total_size = sum(
+            video.get("size", 0)
+            for video in videos
+        )
 
         return jsonify({
-            "folder": folder.get("name", "Google Drive folder"),
+            "folder": folder.get(
+                "name",
+                "Google Drive folder",
+            ),
             "videos": videos,
             "count": len(videos),
+            "total_size": total_size,
+            "total_size_display": format_size(total_size),
         })
 
     except Exception as exc:
@@ -282,36 +408,46 @@ def scan():
         }), 400
 
 
-@app.route("/api/download", methods=["POST"])
-def download():
-    service = drive_service()
+# -------------------------------------------------------------------
+# ZIP background worker
+# -------------------------------------------------------------------
 
-    if not service:
-        return jsonify({
-            "error": "Connect Google Drive first."
-        }), 401
-
-    data = request.get_json(silent=True) or {}
-    video_ids = data.get("ids", [])
-
-    if not video_ids:
-        return jsonify({
-            "error": "No videos selected."
-        }), 400
-
-    if len(video_ids) > 100:
-        return jsonify({
-            "error": "Please select no more than 100 videos at once."
-        }), 400
-
+def build_zip_job(job_id, video_ids):
     temp_dir = TemporaryDirectory()
-    zip_path = os.path.join(temp_dir.name, "drivebatch-videos.zip")
 
     try:
+        service = drive_service()
+
+        if not service:
+            update_job(
+                job_id,
+                status="error",
+                error="Google Drive connection expired. Please reconnect.",
+                message="Drive connection expired.",
+            )
+            temp_dir.cleanup()
+            return
+
+        zip_path = os.path.join(
+            temp_dir.name,
+            "drivebatch-videos.zip",
+        )
+
+        total = len(video_ids)
+
+        update_job(
+            job_id,
+            status="downloading",
+            total=total,
+            current=0,
+            progress=0,
+            message="Starting...",
+        )
+
         with zipfile.ZipFile(
             zip_path,
             "w",
-            compression=zipfile.ZIP_DEFLATED
+            compression=zipfile.ZIP_DEFLATED,
         ) as archive:
 
             used_names = set()
@@ -323,17 +459,34 @@ def download():
                     supportsAllDrives=True,
                 ).execute()
 
-                filename = metadata.get("name", f"video-{index + 1}")
+                filename = metadata.get(
+                    "name",
+                    f"video-{index + 1}",
+                )
 
                 if filename in used_names:
                     base, ext = os.path.splitext(filename)
-                    filename = f"{base}-{index + 1}{ext}"
+                    filename = (
+                        f"{base}-{index + 1}{ext}"
+                    )
 
                 used_names.add(filename)
 
                 local_path = os.path.join(
                     temp_dir.name,
-                    f"video-{index}"
+                    f"video-{index}",
+                )
+
+                update_job(
+                    job_id,
+                    status="downloading",
+                    current=index,
+                    total=total,
+                    progress=int(
+                        (index / total) * 90
+                    ),
+                    current_name=filename,
+                    message=f"Downloading {index + 1} of {total}",
                 )
 
                 request_media = service.files().get_media(
@@ -341,43 +494,329 @@ def download():
                     supportsAllDrives=True,
                 )
 
-                with open(local_path, "wb") as output:
+                with open(
+                    local_path,
+                    "wb",
+                ) as output:
+
                     downloader = MediaIoBaseDownload(
                         output,
                         request_media,
-                        chunksize=1024 * 1024,
+                        chunksize=4 * 1024 * 1024,
                     )
 
                     done = False
 
                     while not done:
-                        _, done = downloader.next_chunk()
+                        status, done = downloader.next_chunk()
 
-                archive.write(local_path, arcname=filename)
+                        if status:
+                            file_progress = int(
+                                status.progress() * 100
+                            )
+
+                            overall = int(
+                                (
+                                    index
+                                    + status.progress()
+                                )
+                                / total
+                                * 90
+                            )
+
+                            update_job(
+                                job_id,
+                                progress=min(
+                                    overall,
+                                    90,
+                                ),
+                                current=index,
+                                total=total,
+                                current_name=filename,
+                                message=(
+                                    f"Downloading "
+                                    f"{index + 1} of {total} "
+                                    f"({file_progress}%)"
+                                ),
+                            )
+
+                update_job(
+                    job_id,
+                    progress=int(
+                        ((index + 1) / total) * 90
+                    ),
+                    current=index + 1,
+                    total=total,
+                    current_name=filename,
+                    message=(
+                        f"Added {index + 1} of {total}"
+                    ),
+                )
+
+                archive.write(
+                    local_path,
+                    arcname=filename,
+                )
 
                 try:
                     os.remove(local_path)
                 except OSError:
                     pass
 
-        return send_file(
-            zip_path,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name="drivebatch-videos.zip",
+        update_job(
+            job_id,
+            status="ready",
+            progress=100,
+            current=total,
+            total=total,
+            current_name="",
+            message="Your ZIP is ready!",
+            path=zip_path,
         )
+
+        # Keep TemporaryDirectory alive by storing it on the job.
+        with JOBS_LOCK:
+            if job_id in DOWNLOAD_JOBS:
+                DOWNLOAD_JOBS[job_id]["temp_dir"] = temp_dir
 
     except Exception as exc:
         temp_dir.cleanup()
 
+        update_job(
+            job_id,
+            status="error",
+            error=str(exc),
+            message="Download failed.",
+        )
+
+
+@app.route("/api/download/start", methods=["POST"])
+def start_download():
+    cleanup_old_jobs()
+
+    if not drive_service():
         return jsonify({
-            "error": f"Download failed: {str(exc)}"
+            "error": "Connect Google Drive first."
+        }), 401
+
+    data = request.get_json(silent=True) or {}
+
+    video_ids = data.get("ids", [])
+
+    if not isinstance(video_ids, list):
+        return jsonify({
+            "error": "Invalid video selection."
+        }), 400
+
+    if not video_ids:
+        return jsonify({
+            "error": "No videos selected."
+        }), 400
+
+    if len(video_ids) > 100:
+        return jsonify({
+            "error": "Please select no more than 100 videos at once."
+        }), 400
+
+    job_id = create_job()
+
+    thread = threading.Thread(
+        target=build_zip_job,
+        args=(job_id, video_ids),
+        daemon=True,
+    )
+
+    thread.start()
+
+    return jsonify({
+        "job_id": job_id
+    })
+
+
+@app.route("/api/download/status/<job_id>")
+def download_status(job_id):
+    job = get_job(job_id)
+
+    if not job:
+        return jsonify({
+            "error": "Download job not found."
+        }), 404
+
+    return jsonify({
+        "status": job.get("status"),
+        "progress": job.get("progress", 0),
+        "current": job.get("current", 0),
+        "total": job.get("total", 0),
+        "current_name": job.get("current_name", ""),
+        "message": job.get("message", ""),
+        "error": job.get("error"),
+        "ready": job.get("status") == "ready",
+    })
+
+
+@app.route("/api/download/file/<job_id>")
+def download_file(job_id):
+    job = get_job(job_id)
+
+    if not job:
+        return jsonify({
+            "error": "Download job not found."
+        }), 404
+
+    if job.get("status") != "ready":
+        return jsonify({
+            "error": "The ZIP is not ready yet."
+        }), 400
+
+    path = job.get("path")
+
+    if not path or not os.path.exists(path):
+        return jsonify({
+            "error": "The ZIP file is no longer available."
+        }), 404
+
+    return send_file(
+        path,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="drivebatch-videos.zip",
+    )
+
+
+@app.route("/api/download/cancel/<job_id>", methods=["POST"])
+def cancel_download(job_id):
+    job = get_job(job_id)
+
+    if not job:
+        return jsonify({
+            "error": "Download job not found."
+        }), 404
+
+    update_job(
+        job_id,
+        status="cancelled",
+        message="Download cancelled.",
+    )
+
+    return jsonify({
+        "success": True
+    })
+
+
+# -------------------------------------------------------------------
+# Individual MP4 / original-file download
+# -------------------------------------------------------------------
+
+@app.route("/api/video/<file_id>")
+def download_video(file_id):
+    service = drive_service()
+
+    if not service:
+        return jsonify({
+            "error": "Connect Google Drive first."
+        }), 401
+
+    try:
+        metadata = service.files().get(
+            fileId=file_id,
+            fields="id,name,mimeType,size",
+            supportsAllDrives=True,
+        ).execute()
+
+        filename = metadata.get(
+            "name",
+            "drivebatch-video",
+        )
+
+        mime_type = metadata.get(
+            "mimeType",
+            "application/octet-stream",
+        )
+
+        request_media = service.files().get_media(
+            fileId=file_id,
+            supportsAllDrives=True,
+        )
+
+        temp_dir = TemporaryDirectory()
+
+        local_path = os.path.join(
+            temp_dir.name,
+            filename,
+        )
+
+        with open(local_path, "wb") as output:
+            downloader = MediaIoBaseDownload(
+                output,
+                request_media,
+                chunksize=4 * 1024 * 1024,
+            )
+
+            done = False
+
+            while not done:
+                _, done = downloader.next_chunk()
+
+        response = send_file(
+            local_path,
+            mimetype=mime_type,
+            as_attachment=True,
+            download_name=filename,
+        )
+
+        @response.call_on_close
+        def cleanup():
+            try:
+                temp_dir.cleanup()
+            except Exception:
+                pass
+
+        return response
+
+    except Exception as exc:
+        return jsonify({
+            "error": f"Video download failed: {str(exc)}"
         }), 500
 
 
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-        debug=False,
-              )
+# -------------------------------------------------------------------
+# Simple video preview
+# -------------------------------------------------------------------
+
+@app.route("/api/preview/<file_id>")
+def preview_video(file_id):
+    service = drive_service()
+
+    if not service:
+        return jsonify({
+            "error": "Connect Google Drive first."
+        }), 401
+
+    try:
+        metadata = service.files().get(
+            fileId=file_id,
+            fields="name,mimeType",
+            supportsAllDrives=True,
+        ).execute()
+
+        mime_type = metadata.get(
+            "mimeType",
+            "video/mp4",
+        )
+
+        request_media = service.files().get_media(
+            fileId=file_id,
+            supportsAllDrives=True,
+        )
+
+        data = io.BytesIO()
+
+        downloader = MediaIoBaseDownload(
+            data,
+            request_media,
+            chunksize=4 * 1024 * 1024,
+        )
+
+        done = False
+
+     
