@@ -408,7 +408,24 @@
 
 const $ = id =>
   document.getElementById(id);
+const driveConnectBtn =
+  document.getElementById("driveConnectBtn");
 
+if (driveConnectBtn) {
+  fetch("/api/auth/status", {
+    cache: "no-store"
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.connected === true) {
+        driveConnectBtn.textContent =
+          "🟢 Google Drive Connected";
+
+        driveConnectBtn.href =
+          "/logout";
+      }
+    });
+}
 
 let videos = [];
 
