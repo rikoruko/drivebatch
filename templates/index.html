@@ -13,7 +13,14 @@
   <a class="logo" href="/">Drive<span>Batch</span></a>
 
   <div class="header-actions">
-    <a class="connect" href="/login">Connect Google Drive</a>
+    <a
+      class="connect"
+      id="driveConnectBtn"
+      href="/login"
+    >
+      Connect Google Drive
+    </a>
+
     <button id="menuBtn">☰</button>
   </div>
 </header>
@@ -425,7 +432,28 @@ const videoList =
 
 const downloadBar =
   $("downloadBar");
+async function updateDriveStatus() {
+  try {
+    const response = await fetch("/api/auth/status", {
+      cache: "no-store"
+    });
 
+    const data = await response.json();
+    const button = $("driveConnectBtn");
+
+    if (!button) return;
+
+    if (data.connected === true) {
+      button.textContent = "🟢 Google Drive Connected";
+      button.href = "/logout";
+      button.title = "Click to disconnect Google Drive";
+    }
+  } catch (error) {
+    console.error("Drive status check failed:", error);
+  }
+}
+
+updateDriveStatus();
 
 /* -------------------------
    FILE SIZE
