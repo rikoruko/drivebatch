@@ -633,6 +633,7 @@ def start_download():
                 "error": None,
                 "cancelled": False,
                 "zip_path": None,
+                "created_at": time.time(),
             }
 
         worker = threading.Thread(
