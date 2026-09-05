@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b0d12">
+  <title>DriveBatch</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<header class="header">
+  <div class="logo">Drive<span>Batch</span></div>
+
+  <button class="menu-button" id="menuButton">☰</button>
+
+  <nav id="nav">
+    <a href="#how">How it works</a>
+    {% if connected %}
+      <a href="/logout">Disconnect</a>
+    {% endif %}
+  </nav>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="badge">GOOGLE DRIVE VIDEO DOWNLOADER</div>
+
+  <h1>Bring your videos together.</h1>
+
+  <p>
+    Paste a Google Drive folder, find videos inside all nested folders,
+    select what you want, and download everything as one ZIP.
+  </p>
+
+  {% if connected %}
+    <div class="connected">
+      <span>●</span> Google Drive connected
+    </div>
+  {% else %}
+    <a class="google-button" href="/login">
+      <span>G</span>
+      Connect Google Drive
+    </a>
+  {% endif %}
+</section>
+
+<section class="scanner">
+
+  <div class="card">
+
+    <div class="card-title">
+      <div>
+        <small>STEP 01</small>
+        <h2>Paste your folder</h2>
+      </div>
+    </div>
+
+    <div class="input-row">
+      <input
+        id="folderUrl"
+        type="url"
+        placeholder="https://drive.google.com/drive/folders/..."
+        {% if not connected %}disabled{% endif %}
+      >
+
+      <button id="scanButton" {% if not connected %}disabled{% endif %}>
+        Scan folder
+      </button>
+    </div>
+
+    <p class="hint">
+      We automatically search through nested folders.
+    </p>
+
+  </div>
+
+  <div id="error" class="error hidden"></div>
+
+  <section id="results" class="results hidden">
+
+    <div class="results-top">
+      <div>
+        <small>VIDEOS FOUND</small>
+        <h2 id="folderName">Folder</h2>
+        <p id="videoCount">0 videos</p>
+      </div>
+
+      <div class="selection-buttons">
+        <button id="selectAll">Select all</button>
+        <button id="clearAll">Clear</button>
+      </div>
+    </div>
+
+    <div class="search-box">
+      <input
+        id="search"
+        type="search"
+        placeholder="Search videos..."
+      >
+    </div>
+
+    <div id="videoList" class="video-list"></div>
+
+  </section>
+
+</section>
+
+<section id="how" class="how">
+
+  <div>
+    <small>HOW IT WORKS</small>
+    <h2>Simple from start to finish.</h2>
+  </div>
+
+  <div class="steps">
+
+    <div class="step">
+      <strong>01</strong>
+      <h3>Connect</h3>
+      <p>Sign in securely with your Google account.</p>
+    </div>
+
+    <div class="step">
+      <strong>02</strong>
+      <h3>Scan</h3>
+      <p>Paste a Drive folder and we'll find its videos.</p>
+    </div>
+
+    <div class="step">
+      <strong>03</strong>
+      <h3>Download</h3>
+      <p>Select multiple videos and download one ZIP.</p>
+    </div>
+
+  </div>
+
+</section>
+
+</main>
+
+<div id="downloadBar" class="download-bar hidden">
+  <div>
+    <strong id="selectedCount">0 selected</strong>
+    <span>Ready to download</span>
+  </div>
+
+  <button id="downloadButton">
+    Download Selected
+  </button>
+</div>
+
+<script>
+
+const scanButton = document.getElementById("scanButton");
+const folderUrl = document.getElementById("folderUrl");
+const results = document.getElementById("results");
+const errorBox = document.getElementById("error");
+const videoList = document.getElementById("videoList");
+const folderName = document.getElementById("folderName");
+const videoCount = document.getElementById("videoCount");
+const search = document.getElementById("search");
+
+const selectAll = document.getElementById("selectAll");
+const clearAll = document.getElementById("clearAll");
+
+const downloadBar = document.getElementById("downloadBar");
+const selectedCount = document.getElementById("selectedCount");
+const downloadButton = document.getElementById("downloadButton");
+
+const menuButton = document.getElementById("menuButton");
+const nav = document.getElementById("nav");
+
+let videos = [];
+let selected = new Set();
+
+menuButton?.addEventListener("click", () => {
+  nav.classList.toggle("open");
+});
+
+
+function showError(message) {
+  errorBox.textContent = message;
+  errorBox.classList.remove("hidden");
+}
+
+
+function hideError() {
+  errorBox.classList.add("hidden");
+}
+
+
+function renderVideos() {
+
+  const query = search.value.toLowerCase().trim();
+
+  videoList.innerHTML = "";
+
+  const filtered = videos.filter(video => {
+    return (
+      video.name.toLowerCase().includes(query) ||
+      video.path.toLowerCase().includes(query)
+    );
+  });
+
+  if (!filtered.length) {
+    videoList.innerHTML = `
+      <div class="empty">
+        No videos match your search.
+      </div>
+    `;
+    return;
+  }
+
+  filtered.forEach(video => {
+
+    const row = document.createElement("label");
+    row.className = "video-row";
+
+    row.innerHTML = `
+      <input
+        type="checkbox"
+        value="${video.id}"
+        ${selected.has(video.id) ? "checked" : ""}
+      >
+
+      <div class="video-icon">▶</div>
+
+      <div class="video-info">
+        <strong>${escapeHtml(video.name)}</strong>
+        <span>${escapeHtml(video.path)}</span>
+      </div>
+
+      <div class="video-size">
+        ${video.size_display}
+      </div>
+    `;
+
+    const checkbox = row.querySelector("input");
+
+    checkbox.addEventListener("change", () => {
+
+      if (checkbox.checked) {
+        selected.add(video.id);
+      } else {
+        selected.delete(video.id);
+      }
+
+      updateSelection();
+    });
+
+    videoList.appendChild(row);
+  });
+}
+
+
+function escapeHtml(value) {
+
+  const div = document.createElement("div");
+  div.textContent = value;
+  return div.innerHTML;
+}
+
+
+function updateSelection() {
+
+  const count = selected.size;
+
+  selectedCount.textContent =
+    `${count} selected`;
+
+  if (count > 0) {
+    downloadBar.classList.remove("hidden");
+  } else {
+    downloadBar.classList.add("hidden");
+  }
+
+  document.querySelectorAll(
+    '.video-row input[type="checkbox"]'
+  ).forEach(box => {
+    box.checked = selected.has(box.value);
+  });
+}
+
+
+scanButton?.addEventListener("click", async () => {
+
+  hideError();
+
+  const url = folderUrl.value.trim();
+
+  if (!url) {
+    showError("Paste a Google Drive folder link first.");
+    return;
+  }
+
+  scanButton.disabled = true;
+  scanButton.textContent = "Scanning...";
+
+  try {
+
+    const response = await fetch("/api/scan", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ url })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Unable to scan folder.");
+    }
+
+    videos = data.videos || [];
+    selected.clear();
+
+    folderName.textContent =
+      data.folder || "Google Drive folder";
+
+    videoCount.textContent =
+      `${videos.length} video${videos.length === 1 ? "" : "s"}`;
+
+    results.classList.remove("hidden");
+
+    renderVideos();
+    updateSelection();
+
+  } catch (error) {
+
+    showError(error.message);
+
+  } finally {
+
+    scanButton.disabled = false;
+    scanButton.textContent = "Scan folder";
+  }
+});
+
+
+search?.addEventListener("input", renderVideos);
+
+
+selectAll?.addEventListener("click", () => {
+
+  videos.forEach(video => selected.add(video.id));
+
+  renderVideos();
+  updateSelection();
+});
+
+
+clearAll?.addEventListener("click", () => {
+
+  selected.clear();
+
+  renderVideos();
+  updateSelection();
+});
+
+
+downloadButton?.addEventListener("click", async () => {
+
+  if (!selected.size) {
+    return;
+  }
+
+  downloadButton.disabled = true;
+  downloadButton.textContent = "Preparing ZIP...";
+
+  hideError();
+
+  try {
+
+    const response = await fetch("/api/download", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ids: Array.from(selected)
+      })
+    });
+
+    if (!response.ok) {
+
+      let message = "Download failed.";
+
+      try {
+        const data = await response.json();
+        message = data.error || message;
+      } catch {}
+
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "drivebatch-videos.zip";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
+
+  } catch (error) {
+
+    showError(error.message);
+
+  } finally {
+
+    downloadButton.disabled = false;
+    downloadButton.textContent = "Download Selected";
+  }
+});
+
+</script>
+
+</body>
+</html>
