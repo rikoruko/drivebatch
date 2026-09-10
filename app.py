@@ -183,19 +183,18 @@ def list_children(service, folder_id):
             ),
             fields=(
                 "nextPageToken,"
-                "files(id,name,mimeType,size)"
+                "files(id,name,mimeType,size,"
+                "shortcutDetails)"
             ),
             pageSize=1000,
             pageToken=page_token,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
         ).execute()
 
-        files.extend(
-            response.get("files", [])
-        )
+        files.extend(response.get("files", []))
 
-        page_token = response.get(
-            "nextPageToken"
-        )
+        page_token = response.get("nextPageToken")
 
         if not page_token:
             break
@@ -219,19 +218,21 @@ def scan_recursive(
 
     results = []
 
-    for item in list_children(
-        service,
-        folder_id
-    ):
-        name = item.get(
-            "name",
-            "Untitled"
-        )
+    for item in list_children(service, folder_id):
 
-        mime = item.get(
-            "mimeType",
-            ""
-        )
+        name = item.get("name", "Untitled")
+        mime = item.get("mimeType", "")
+        item_id = item.get("id")
+
+        shortcut = item.get("shortcutDetails")
+
+        if shortcut:
+            target_id = shortcut.get("targetId")
+            target_mime = shortcut.get("targetMimeType")
+
+            if target_id:
+                item_id = target_id
+                mime = target_mime or mime
 
         current_path = (
             f"{path}/{name}"
@@ -240,23 +241,23 @@ def scan_recursive(
         )
 
         if mime == "application/vnd.google-apps.folder":
+
             results.extend(
                 scan_recursive(
                     service,
-                    item["id"],
+                    item_id,
                     current_path,
                     visited,
                 )
             )
 
         elif is_video(item):
+
             results.append({
-                "id": item["id"],
+                "id": item_id,
                 "name": name,
                 "mimeType": mime,
-                "size": int(
-                    item.get("size") or 0
-                ),
+                "size": int(item.get("size") or 0),
                 "path": current_path,
             })
 
