@@ -1139,7 +1139,6 @@ def stream_drive_file(file_id, as_attachment=False):
 
     meta_data = meta_res.json()
     filename = safe_name(meta_data.get("name", "video"))
-    mime = meta_data.get("mimeType", "video/mp4")
 
     media_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
     req_headers = {}
@@ -1315,12 +1314,6 @@ cleanup_thread.start()
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
-        port=int(
-            os.environ.get(
-                "PORT",
-                5000
-            )
-        ),
-        debug=False,
+        port=int(os.environ.get("PORT", 5000))
     )
     
