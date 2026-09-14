@@ -72,11 +72,12 @@ def redirect_uri():
     return value
 
 
-def make_flow():
+def make_flow(state=None):
     return Flow.from_client_config(
         client_config(),
         scopes=SCOPES,
         redirect_uri=redirect_uri(),
+        state=state,
     )
 
 
@@ -299,14 +300,9 @@ def login():
 @app.route("/oauth2callback")
 def oauth_callback():
     try:
-        flow = make_flow()
+        state = session.get("oauth_state")
 
-        state = session.get(
-            "oauth_state"
-        )
-
-        if state:
-            flow.state = state
+        flow = make_flow(state=state)
 
         flow.fetch_token(
             authorization_response=request.url
@@ -450,6 +446,8 @@ def compress_video(input_path, output_path, quality):
     height = quality_map.get(quality, 720)
     
     ffmpeg_path = static_ffmpeg.find_ffmpeg()
+    if isinstance(ffmpeg_path, tuple):
+        ffmpeg_path = ffmpeg_path[0]
     
     cmd = [
         ffmpeg_path,
@@ -464,8 +462,11 @@ def compress_video(input_path, output_path, quality):
         output_path
     ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.returncode == 0
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def zip_worker(
@@ -481,6 +482,8 @@ def zip_worker(
         temp_dir,
         "DriveBatch.zip"
     )
+
+    set_job(job_id, temp_dir=temp_dir)
 
     try:
         service = build(
@@ -631,6 +634,8 @@ def compress_worker(
     temp_dir = tempfile.mkdtemp(
         prefix="drivebatch_compress_"
     )
+
+    set_compress_job(job_id, temp_dir=temp_dir)
 
     try:
         service = build(
@@ -849,6 +854,7 @@ def start_download():
                 "error": None,
                 "cancelled": False,
                 "zip_path": None,
+                "temp_dir": None,
                 "created_at": time.time(),
             }
 
@@ -1090,13 +1096,8 @@ def compress_file(job_id):
 
     zip_path = job.get("zip_path")
     file_path = job.get("file_path")
-    temp_dir = job.get("temp_dir")
 
     if zip_path and os.path.exists(zip_path):
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
         return send_file(
             zip_path,
             mimetype="application/zip",
@@ -1105,10 +1106,6 @@ def compress_file(job_id):
             max_age=0,
         )
     elif file_path and os.path.exists(file_path):
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
         return send_file(
             file_path,
             mimetype="video/mp4",
@@ -1232,7 +1229,7 @@ def cleanup_jobs():
         now = time.time()
 
         with DOWNLOAD_LOCK:
-            old_jobs = []
+            old_download_jobs = []
 
             for job_id, job in DOWNLOAD_JOBS.items():
                 created = job.get(
@@ -1241,25 +1238,57 @@ def cleanup_jobs():
                 )
 
                 if now - created > 3600:
-                    old_jobs.append(
+                    old_download_jobs.append(
                         job_id
                     )
 
-            for job_id in old_jobs:
+            for job_id in old_download_jobs:
                 job = DOWNLOAD_JOBS.pop(
                     job_id,
                     None
                 )
 
                 if job:
-                    path = job.get(
-                        "zip_path"
+                    temp_dir = job.get("temp_dir") or (
+                        os.path.dirname(job.get("zip_path"))
+                        if job.get("zip_path")
+                        else None
                     )
-
-                    if path:
+                    if temp_dir:
                         try:
                             shutil.rmtree(
-                                os.path.dirname(path),
+                                temp_dir,
+                                ignore_errors=True
+                            )
+                        except Exception:
+                            pass
+
+        with COMPRESS_LOCK:
+            old_compress_jobs = []
+
+            for job_id, job in COMPRESS_JOBS.items():
+                created = job.get(
+                    "created_at",
+                    now
+                )
+
+                if now - created > 3600:
+                    old_compress_jobs.append(
+                        job_id
+                    )
+
+            for job_id in old_compress_jobs:
+                job = COMPRESS_JOBS.pop(
+                    job_id,
+                    None
+                )
+
+                if job:
+                    temp_dir = job.get("temp_dir")
+                    if temp_dir:
+                        try:
+                            shutil.rmtree(
+                                temp_dir,
                                 ignore_errors=True
                             )
                         except Exception:
@@ -1294,3 +1323,4 @@ if __name__ == "__main__":
         ),
         debug=False,
     )
+    
