@@ -445,7 +445,7 @@ def compress_video(input_path, output_path, quality):
     }
     height = quality_map.get(quality, 720)
     
-    ffmpeg_path = static_ffmpeg.find_ffmpeg()
+    ffmpeg_path = static_ffmpeg.get_ffmpeg()
     if isinstance(ffmpeg_path, tuple):
         ffmpeg_path = ffmpeg_path[0]
     
