@@ -273,6 +273,7 @@ main{
   border:1px solid #1c2029;
   border-radius:16px;
   transition:.15s;
+  flex-wrap:wrap;
 }
 
 .video-card:hover{
@@ -304,14 +305,16 @@ main{
 .video-info{
   flex:1;
   min-width:0;
+  word-wrap:break-word;
+  overflow-wrap:break-word;
 }
 
 .video-info h3{
   font-size:14px;
   margin:0 0 4px;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  word-wrap:break-word;
+  overflow-wrap:break-word;
+  white-space:normal;
   color:#e0e0e0;
 }
 
@@ -327,6 +330,22 @@ main{
 
 .video-info p{
   margin:0 0 3px;
+}
+
+.stream-saver-button{
+  border:1px solid #292e39;
+  background:#151821;
+  color:#fff;
+  border-radius:11px;
+  padding:8px 12px;
+  font-size:12px;
+  font-weight:700;
+  white-space:nowrap;
+}
+
+.stream-saver-button:hover{
+  border-color:#7c5cff;
+  background:#1a1d28;
 }
 
 .download-button{
@@ -483,6 +502,19 @@ main{
   display:none!important;
 }
 
+.quality-options{
+  display:flex;
+  gap:12px;
+  margin-top:15px;
+}
+
+.quality-btn{
+  flex:1;
+  padding:15px;
+  font-size:16px;
+  font-weight:800;
+}
+
 @media(max-width:700px){
   header{
     padding:0 16px;
@@ -543,57 +575,6 @@ main{
   .about{
     grid-template-columns:1fr;
   }
-}
-
-@media(max-width:560px){
-
-  header{
-    height:64px;
-  }
-
-  .logo{
-    font-size:20px;
-  }
-
-  .connect{
-    display:none;
-  }
-
-  .hero{
-    padding:48px 0 35px;
-  }
-
-  .hero h1{
-    font-size:40px;
-    letter-spacing:-2.5px;
-  }
-
-  .hero p{
-    line-height:1.5;
-  }
-
-  .hero-connect{
-    width:100%;
-    padding:15px;
-  }
-
-  .section-title{
-    align-items:flex-start;
-  }
-
-  .section-title h2{
-    font-size:19px;
-  }
-
-  .section-title p{
-    font-size:13px;
-  }
-
-  .folder-icon{
-    width:44px;
-    height:44px;
-    font-size:21px;
-  }
 
   .video-card{
     gap:8px;
@@ -615,6 +596,12 @@ main{
     height:39px;
   }
 
+  .stream-saver-button{
+    width:100%;
+    order:10;
+    margin-top:8px;
+  }
+
   .video-info h3{
     font-size:13px;
   }
@@ -628,6 +615,7 @@ main{
     bottom:9px;
     width:calc(100% - 16px);
     padding:10px;
+    flex-wrap:wrap;
   }
 
   .download-bar .primary{
@@ -648,6 +636,10 @@ main{
 
   .preview-box video{
     max-height:45vh;
+  }
+
+  .quality-options{
+    flex-direction:column;
   }
 }
 

@@ -8,6 +8,7 @@ import shutil
 import zipfile
 import tempfile
 import threading
+import subprocess
 
 from flask import (
     Flask, render_template, request, redirect, session, jsonify,
@@ -17,6 +18,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import AuthorizedSession
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+import static_ffmpeg
 
 
 app = Flask(__name__)
@@ -43,6 +45,9 @@ VIDEO_EXTENSIONS = {
 
 DOWNLOAD_JOBS = {}
 DOWNLOAD_LOCK = threading.Lock()
+
+COMPRESS_JOBS = {}
+COMPRESS_LOCK = threading.Lock()
 
 
 def client_config():
@@ -407,6 +412,17 @@ def get_job(job_id):
         return DOWNLOAD_JOBS.get(job_id)
 
 
+def set_compress_job(job_id, **values):
+    with COMPRESS_LOCK:
+        if job_id in COMPRESS_JOBS:
+            COMPRESS_JOBS[job_id].update(values)
+
+
+def get_compress_job(job_id):
+    with COMPRESS_LOCK:
+        return COMPRESS_JOBS.get(job_id)
+
+
 def download_drive_file(
     credentials,
     file_id,
@@ -423,6 +439,33 @@ def download_drive_file(
         for chunk in response.iter_content(chunk_size=1024 * 1024):
             if chunk:
                 output.write(chunk)
+
+
+def compress_video(input_path, output_path, quality):
+    quality_map = {
+        "360p": 360,
+        "720p": 720,
+        "1080p": 1080
+    }
+    height = quality_map.get(quality, 720)
+    
+    ffmpeg_path = static_ffmpeg.find_ffmpeg()
+    
+    cmd = [
+        ffmpeg_path,
+        "-i", input_path,
+        "-vf", f"scale=-2:{height}",
+        "-c:v", "libx264",
+        "-crf", "26",
+        "-preset", "fast",
+        "-c:a", "aac",
+        "-movflags", "+faststart",
+        "-y",
+        output_path
+    ]
+    
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0
 
 
 def zip_worker(
@@ -573,6 +616,181 @@ def zip_worker(
 
     except Exception as exc:
         set_job(
+            job_id,
+            status="error",
+            error=str(exc),
+        )
+
+
+def compress_worker(
+    job_id,
+    file_ids,
+    credentials,
+    quality,
+):
+    temp_dir = tempfile.mkdtemp(
+        prefix="drivebatch_compress_"
+    )
+
+    try:
+        service = build(
+            "drive",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
+
+        total = len(file_ids)
+
+        set_compress_job(
+            job_id,
+            status="running",
+            total=total,
+            completed=0,
+            progress=0,
+            message="Starting compression...",
+        )
+
+        output_files = []
+
+        for index, file_id in enumerate(
+            file_ids,
+            start=1
+        ):
+            job = get_compress_job(job_id)
+
+            if not job:
+                return
+
+            if job.get("cancelled"):
+                set_compress_job(
+                    job_id,
+                    status="cancelled",
+                    message="Compression cancelled.",
+                )
+                return
+
+            try:
+                metadata = service.files().get(
+                    fileId=file_id,
+                    fields="id,name,mimeType,size",
+                ).execute()
+
+                filename = safe_name(
+                    metadata.get(
+                        "name",
+                        f"video_{index}"
+                    )
+                )
+
+                if not filename.endswith('.mp4'):
+                    filename += '.mp4'
+
+                input_path = os.path.join(
+                    temp_dir,
+                    f"input_{index}_{filename}"
+                )
+
+                output_path = os.path.join(
+                    temp_dir,
+                    f"output_{index}_{filename}"
+                )
+
+                set_compress_job(
+                    job_id,
+                    message=f"Downloading {filename}...",
+                )
+
+                download_drive_file(
+                    credentials,
+                    file_id,
+                    input_path,
+                )
+
+                set_compress_job(
+                    job_id,
+                    message=f"Compressing {filename}...",
+                )
+
+                success = compress_video(
+                    input_path,
+                    output_path,
+                    quality,
+                )
+
+                if not success:
+                    raise RuntimeError(
+                        f"Failed to compress {filename}"
+                    )
+
+                output_files.append(output_path)
+
+                try:
+                    os.remove(input_path)
+                except Exception:
+                    pass
+
+                progress = int(
+                    index / total * 100
+                )
+
+                set_compress_job(
+                    job_id,
+                    completed=index,
+                    progress=progress,
+                    message=f"{index} / {total} videos",
+                )
+
+            except Exception as exc:
+                set_compress_job(
+                    job_id,
+                    status="error",
+                    error=f"Could not compress video {index}: {exc}",
+                )
+                return
+
+        is_batch = len(file_ids) > 1
+
+        if is_batch:
+            zip_path = os.path.join(
+                temp_dir,
+                "StreamSaver.zip"
+            )
+
+            with zipfile.ZipFile(
+                zip_path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+            ) as archive:
+
+                for output_file in output_files:
+                    archive.write(
+                        output_file,
+                        arcname=os.path.basename(output_file),
+                    )
+
+            set_compress_job(
+                job_id,
+                status="done",
+                progress=100,
+                completed=total,
+                message="Compression ready!",
+                zip_path=zip_path,
+                temp_dir=temp_dir,
+            )
+        else:
+            set_compress_job(
+                job_id,
+                status="done",
+                progress=100,
+                completed=total,
+                message="Compression ready!",
+                file_path=output_files[0] if output_files else None,
+                temp_dir=temp_dir,
+            )
+
+    except Exception as exc:
+        set_compress_job(
             job_id,
             status="error",
             error=str(exc),
@@ -739,6 +957,169 @@ def cancel_download(job_id):
     return jsonify({
         "success": True
     })
+
+
+@app.route("/api/compress/start", methods=["POST"])
+def start_compress():
+    try:
+        credentials = credentials_copy()
+
+        if not credentials:
+            return jsonify({
+                "error": "Please connect Google Drive first."
+            }), 401
+
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        file_ids = data.get(
+            "file_ids",
+            data.get("ids", [])
+        )
+
+        quality = data.get("quality", "720p")
+
+        if quality not in ["360p", "720p", "1080p"]:
+            return jsonify({
+                "error": "Invalid quality. Choose 360p, 720p, or 1080p."
+            }), 400
+
+        if not isinstance(file_ids, list):
+            return jsonify({
+                "error": "file_ids must be a list."
+            }), 400
+
+        file_ids = [
+            str(file_id)
+            for file_id in file_ids
+            if str(file_id).strip()
+        ]
+
+        if not file_ids:
+            return jsonify({
+                "error": "No videos were selected."
+            }), 400
+
+        if len(file_ids) > 500:
+            return jsonify({
+                "error": "You can compress up to 500 videos at once."
+            }), 400
+
+        job_id = uuid.uuid4().hex
+
+        with COMPRESS_LOCK:
+            COMPRESS_JOBS[job_id] = {
+                "status": "queued",
+                "total": len(file_ids),
+                "completed": 0,
+                "progress": 0,
+                "message": "Starting compression...",
+                "error": None,
+                "cancelled": False,
+                "file_path": None,
+                "zip_path": None,
+                "temp_dir": None,
+                "created_at": time.time(),
+            }
+
+        worker = threading.Thread(
+            target=compress_worker,
+            args=(
+                job_id,
+                file_ids,
+                credentials,
+                quality,
+            ),
+            daemon=True,
+        )
+
+        worker.start()
+
+        return jsonify({
+            "success": True,
+            "job_id": job_id,
+            "is_batch": len(file_ids) > 1,
+        })
+
+    except Exception as exc:
+        return jsonify({
+            "error": str(exc)
+        }), 500
+
+
+@app.route("/api/compress/status/<job_id>")
+def compress_status(job_id):
+    job = get_compress_job(job_id)
+
+    if not job:
+        return jsonify({
+            "error": "Compression job not found."
+        }), 404
+
+    response = {
+        "status": job.get("status"),
+        "total": job.get("total", 0),
+        "completed": job.get("completed", 0),
+        "progress": job.get("progress", 0),
+        "message": job.get("message"),
+    }
+
+    if job.get("error"):
+        response["error"] = job["error"]
+
+    if job.get("status") == "done":
+        response["ready"] = True
+
+    return jsonify(response)
+
+
+@app.route("/api/compress/file/<job_id>")
+def compress_file(job_id):
+    job = get_compress_job(job_id)
+
+    if not job:
+        return jsonify({
+            "error": "Compression job not found."
+        }), 404
+
+    if job.get("status") != "done":
+        return jsonify({
+            "error": "Compression not ready yet."
+        }), 409
+
+    zip_path = job.get("zip_path")
+    file_path = job.get("file_path")
+    temp_dir = job.get("temp_dir")
+
+    if zip_path and os.path.exists(zip_path):
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return send_file(
+            zip_path,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name="StreamSaver.zip",
+            max_age=0,
+        )
+    elif file_path and os.path.exists(file_path):
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return send_file(
+            file_path,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name=os.path.basename(file_path),
+            max_age=0,
+        )
+    else:
+        return jsonify({
+            "error": "File no longer available."
+        }), 404
 
 
 def stream_drive_file(file_id, as_attachment=False):
