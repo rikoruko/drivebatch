@@ -1146,7 +1146,7 @@ function closeStreamSaver() {
 }
 
 
-function startCompression(quality) {
+async function startCompression(quality) {
 
   compressQuality = quality;
 
@@ -1182,60 +1182,60 @@ function startCompression(quality) {
   }
 
 
-  fetch(
-    "/api/compress/start",
-    {
-      method: "POST",
+  try {
+    const response = await fetch(
+      "/api/compress/start",
+      {
+        method: "POST",
 
-      headers: {
-        "Content-Type":
-          "application/json"
-      },
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
 
-      body: JSON.stringify({
-        file_ids: ids,
-        quality: quality,
-      })
-    }
-  )
-    .then(response => readJson(response))
-    .then(data => {
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-          "Could not start compression."
-        );
+        body: JSON.stringify({
+          file_ids: ids,
+          quality: quality,
+        })
       }
+    );
 
-      compressJobId =
-        data.job_id ||
-        data.jobId ||
-        data.id;
+    const data = await readJson(response);
 
-
-      if (!compressJobId) {
-        throw new Error(
-          "The server did not return a compression job."
-        );
-      }
-
-      pollCompressJob();
-
-    })
-    .catch(error => {
-
-      $("compressProgressModal")
-        .classList.add(
-          "hidden"
-        );
-
-      alert(
-        error.message ||
+    if (!response.ok) {
+      throw new Error(
+        data.error ||
         "Could not start compression."
       );
+    }
 
-    });
+    compressJobId =
+      data.job_id ||
+      data.jobId ||
+      data.id;
+
+
+    if (!compressJobId) {
+      throw new Error(
+        "The server did not return a compression job."
+      );
+    }
+
+    pollCompressJob();
+
+  } catch (error) {
+
+    $("compressProgressModal")
+      .classList.add(
+        "hidden"
+      );
+
+    alert(
+      error.message ||
+      "Could not start compression."
+    );
+
+  }
 
 }
 
