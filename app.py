@@ -9,11 +9,14 @@ import zipfile
 import tempfile
 import threading
 
-from flask import Flask, render_template, request, redirect, session, jsonify, send_file
+from flask import (
+    Flask, render_template, request, redirect, session, jsonify,
+    send_file, Response, stream_with_context
+)
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import AuthorizedSession
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 
 
 app = Flask(__name__)
@@ -405,28 +408,21 @@ def get_job(job_id):
 
 
 def download_drive_file(
-    service,
+    credentials,
     file_id,
     output_path,
 ):
-    request_obj = service.files().get_media(
-        fileId=file_id
-    )
+    authed_session = AuthorizedSession(credentials)
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+    
+    response = authed_session.get(url, stream=True)
+    if response.status_code != 200:
+        raise RuntimeError(f"HTTP {response.status_code} while downloading file {file_id}")
 
-    with open(
-        output_path,
-        "wb"
-    ) as output:
-        downloader = MediaIoBaseDownload(
-            output,
-            request_obj,
-            chunksize=8 * 1024 * 1024,
-        )
-
-        done = False
-
-        while not done:
-            _, done = downloader.next_chunk()
+    with open(output_path, "wb") as output:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                output.write(chunk)
 
 
 def zip_worker(
@@ -527,7 +523,7 @@ def zip_worker(
                     )
 
                     download_drive_file(
-                        service,
+                        credentials,
                         file_id,
                         local_path,
                     )
@@ -581,6 +577,7 @@ def zip_worker(
             status="error",
             error=str(exc),
         )
+
 
 @app.route("/api/download/start", methods=["POST"])
 def start_download():
@@ -744,67 +741,73 @@ def cancel_download(job_id):
     })
 
 
+def stream_drive_file(file_id, as_attachment=False):
+    credentials = credentials_from_session()
+
+    if not credentials:
+        return jsonify({
+            "error": "Please connect Google Drive first."
+        }), 401
+
+    authed_session = AuthorizedSession(credentials)
+
+    meta_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?fields=name,mimeType,size"
+    meta_res = authed_session.get(meta_url)
+
+    if meta_res.status_code != 200:
+        return jsonify({
+            "error": "Could not retrieve video details from Google Drive."
+        }), meta_res.status_code
+
+    meta_data = meta_res.json()
+    filename = safe_name(meta_data.get("name", "video"))
+    mime = meta_data.get("mimeType", "video/mp4")
+
+    media_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+    req_headers = {}
+
+    range_header = request.headers.get("Range")
+    if range_header:
+        req_headers["Range"] = range_header
+
+    drive_res = authed_session.get(
+        media_url,
+        headers=req_headers,
+        stream=True
+    )
+
+    if drive_res.status_code not in (200, 206):
+        return jsonify({
+            "error": f"Failed to download video stream (HTTP {drive_res.status_code})."
+        }), drive_res.status_code
+
+    headers = {}
+    for header in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]:
+        if header in drive_res.headers:
+            headers[header] = drive_res.headers[header]
+
+    if "Accept-Ranges" not in headers:
+        headers["Accept-Ranges"] = "bytes"
+
+    disposition = "attachment" if as_attachment else "inline"
+    headers["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+
+    def generate():
+        for chunk in drive_res.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                yield chunk
+
+    return Response(
+        stream_with_context(generate()),
+        status=drive_res.status_code,
+        headers=headers,
+    )
+
+
 @app.route("/api/video/<file_id>")
 def download_video(file_id):
     try:
-        credentials = credentials_from_session()
-
-        if not credentials:
-            return jsonify({
-                "error": "Please connect Google Drive first."
-            }), 401
-
-        service = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
-        )
-
-        metadata = service.files().get(
-            fileId=file_id,
-            fields="name,mimeType,size",
-        ).execute()
-
-        filename = safe_name(
-            metadata.get(
-                "name",
-                "video"
-            )
-        )
-
-        mime = metadata.get(
-            "mimeType",
-            "application/octet-stream"
-        )
-
-        request_obj = service.files().get_media(
-            fileId=file_id
-        )
-
-        memory = io.BytesIO()
-
-        downloader = MediaIoBaseDownload(
-            memory,
-            request_obj,
-            chunksize=8 * 1024 * 1024,
-        )
-
-        done = False
-
-        while not done:
-            _, done = downloader.next_chunk()
-
-        memory.seek(0)
-
-        return send_file(
-            memory,
-            mimetype=mime,
-            as_attachment=True,
-            download_name=filename,
-            max_age=0,
-        )
-
+        return stream_drive_file(file_id, as_attachment=True)
     except Exception as exc:
         return jsonify({
             "error": str(exc)
@@ -814,62 +817,7 @@ def download_video(file_id):
 @app.route("/api/preview/<file_id>")
 def preview_video(file_id):
     try:
-        credentials = credentials_from_session()
-
-        if not credentials:
-            return jsonify({
-                "error": "Please connect Google Drive first."
-            }), 401
-
-        service = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
-        )
-
-        metadata = service.files().get(
-            fileId=file_id,
-            fields="name,mimeType",
-        ).execute()
-
-        mime = metadata.get(
-            "mimeType",
-            "video/mp4"
-        )
-
-        request_obj = service.files().get_media(
-            fileId=file_id
-        )
-
-        memory = io.BytesIO()
-
-        downloader = MediaIoBaseDownload(
-            memory,
-            request_obj,
-            chunksize=8 * 1024 * 1024,
-        )
-
-        done = False
-
-        while not done:
-            _, done = downloader.next_chunk()
-
-        memory.seek(0)
-
-        return send_file(
-            memory,
-            mimetype=mime,
-            as_attachment=False,
-            download_name=safe_name(
-                metadata.get(
-                    "name",
-                    "video"
-                )
-            ),
-            max_age=0,
-        )
-
+        return stream_drive_file(file_id, as_attachment=False)
     except Exception as exc:
         return jsonify({
             "error": str(exc)

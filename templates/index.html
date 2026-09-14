@@ -960,11 +960,7 @@ function downloadSingle(id) {
 
 
   link.href = url;
-
-  link.target = "_blank";
-
-  link.rel = "noopener";
-
+  link.download = "";
 
   document.body.appendChild(
     link
@@ -1437,14 +1433,7 @@ $("successDownload").onclick =
     link.href =
       jobFileUrl;
 
-
-    link.target =
-      "_blank";
-
-
-    link.rel =
-      "noopener";
-
+    link.download = "DriveBatch.zip";
 
     document.body.appendChild(
       link
