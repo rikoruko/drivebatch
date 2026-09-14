@@ -9,6 +9,10 @@ import zipfile
 import tempfile
 import threading
 import subprocess
+import static_ffmpeg
+
+
+static_ffmpeg.add_paths()
 
 from flask import (
     Flask, render_template, request, redirect, session, jsonify,
@@ -18,7 +22,6 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import AuthorizedSession
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-import static_ffmpeg
 
 
 app = Flask(__name__)
@@ -445,12 +448,8 @@ def compress_video(input_path, output_path, quality):
     }
     height = quality_map.get(quality, 720)
     
-    ffmpeg_path = static_ffmpeg.get_ffmpeg()
-    if isinstance(ffmpeg_path, tuple):
-        ffmpeg_path = ffmpeg_path[0]
-    
     cmd = [
-        ffmpeg_path,
+        "ffmpeg",
         "-i", input_path,
         "-vf", f"scale=-2:{height}",
         "-c:v", "libx264",
