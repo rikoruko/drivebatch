@@ -463,7 +463,7 @@ def zip_worker(
         with zipfile.ZipFile(
             zip_path,
             "w",
-            compression=zipfile.ZIP_STORED,
+            compression=zipfile.ZIP_DEFLATED,
         ) as archive:
 
             for index, file_id in enumerate(
