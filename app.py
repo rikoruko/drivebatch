@@ -445,17 +445,24 @@ def download_drive_file(
     authed_session = AuthorizedSession(credentials)
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
     
-    response = authed_session.get(url, stream=True)
-    if response.status_code != 200:
-        raise RuntimeError(f"HTTP {response.status_code} while downloading file {file_id}")
+    with authed_session.get(url, stream=True) as response:
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"HTTP {response.status_code} while downloading file {file_id}"
+            )
 
-    with open(output_path, "wb") as output:
-        for chunk in response.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                output.write(chunk)
+        with open(output_path, "wb") as output:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    output.write(chunk)
 
 
-def compress_video(input_path, output_path, quality):
+def compress_video(
+    input_path,
+    output_path,
+    quality,
+    progress_callback=None,
+):
     quality_map = {
         "360p": 360,
         "720p": 720,
@@ -463,8 +470,16 @@ def compress_video(input_path, output_path, quality):
     }
     height = quality_map.get(quality, 720)
     
+    ffmpeg_path = static_ffmpeg.get_ffmpeg()
+    if isinstance(ffmpeg_path, tuple):
+        ffmpeg_path = ffmpeg_path[0]
+
     cmd = [
-        "ffmpeg",
+        ffmpeg_path,
+        "-nostdin",
+        "-loglevel", "error",
+        "-progress", "pipe:1",
+        "-nostats",
         "-i", input_path,
         "-vf", f"scale='min({height},iw)':-2",
         "-c:v", "libx264",
@@ -477,9 +492,26 @@ def compress_video(input_path, output_path, quality):
     ]
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result.returncode == 0
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+
+        for line in process.stdout or ():
+            if progress_callback and line.startswith("out_time_ms="):
+                try:
+                    progress_callback(int(line.split("=", 1)[1]) / 1000000)
+                except (TypeError, ValueError):
+                    pass
+
+        return process.wait() == 0
     except Exception:
+        if "process" in locals() and process.poll() is None:
+            process.kill()
+            process.wait()
         return False
 
 
@@ -735,6 +767,17 @@ def compress_worker(
                     input_path,
                     output_path,
                     quality,
+                    progress_callback=lambda seconds: set_compress_job(
+                        job_id,
+                        progress=min(
+                            99,
+                            max(1, int((index - 1) / total * 100)),
+                        ),
+                        message=(
+                            f"Compressing {filename} "
+                            f"({int(seconds)}s encoded)..."
+                        ),
+                    ),
                 )
 
                 if not success:
