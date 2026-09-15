@@ -470,12 +470,8 @@ def compress_video(
     }
     height = quality_map.get(quality, 720)
     
-    ffmpeg_path = static_ffmpeg.get_ffmpeg()
-    if isinstance(ffmpeg_path, tuple):
-        ffmpeg_path = ffmpeg_path[0]
-
     cmd = [
-        ffmpeg_path,
+        "ffmpeg",
         "-nostdin",
         "-loglevel", "error",
         "-progress", "pipe:1",
