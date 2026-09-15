@@ -536,6 +536,20 @@ def cloudconvert_video(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+
+    def require_cloudconvert_success(response):
+        if response.ok:
+            return
+        try:
+            details = response.json().get("message")
+        except ValueError:
+            details = None
+        if not details:
+            details = response.text[:300].strip()
+        raise RuntimeError(
+            f"CloudConvert API returned {response.status_code}: {details}"
+        )
+
     job_response = requests.post(
         "https://api.cloudconvert.com/v2/jobs",
         headers=headers,
@@ -560,7 +574,7 @@ def cloudconvert_video(
         },
         timeout=30,
     )
-    job_response.raise_for_status()
+    require_cloudconvert_success(job_response)
     job = job_response.json()["data"]
     upload_task = next(
         task for task in job["tasks"] if task["name"] == "upload"
@@ -584,7 +598,7 @@ def cloudconvert_video(
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=30,
         )
-        current.raise_for_status()
+        require_cloudconvert_success(current)
         data = current.json()["data"]
         tasks = data.get("tasks", [])
         convert_task = next(
@@ -613,7 +627,7 @@ def cloudconvert_video(
             )
             output_url = export_task["result"]["files"][0]["url"]
             with requests.get(output_url, stream=True, timeout=600) as download:
-                download.raise_for_status()
+                require_cloudconvert_success(download)
                 with open(output_path, "wb") as output:
                     for chunk in download.iter_content(1024 * 1024):
                         if chunk:
