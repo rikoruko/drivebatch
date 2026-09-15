@@ -10,6 +10,7 @@ import tempfile
 import threading
 import subprocess
 import static_ffmpeg
+import requests
 
 
 static_ffmpeg.add_paths()
@@ -512,6 +513,124 @@ def compress_video(
         return False
 
 
+def cloudconvert_video(
+    input_path,
+    output_path,
+    quality,
+    job_id,
+    filename,
+):
+    api_key = os.environ.get("CLOUDCONVERT_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "CLOUDCONVERT_API_KEY is not configured."
+        )
+
+    height = {
+        "360p": 360,
+        "480p": 480,
+        "720p": 720,
+        "1080p": 1080,
+    }[quality]
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    job_response = requests.post(
+        "https://api.cloudconvert.com/v2/jobs",
+        headers=headers,
+        json={
+            "tasks": {
+                "upload": {"operation": "import/upload"},
+                "convert": {
+                    "operation": "convert",
+                    "input": "upload",
+                    "output_format": "mp4",
+                    "video_codec": "h264",
+                    "height": height,
+                    "preset": "veryfast",
+                    "crf": 26,
+                },
+                "export": {
+                    "operation": "export/url",
+                    "input": "convert",
+                    "inline": False,
+                },
+            }
+        },
+        timeout=30,
+    )
+    job_response.raise_for_status()
+    job = job_response.json()["data"]
+    upload_task = next(
+        task for task in job["tasks"] if task["name"] == "upload"
+    )
+    upload_url = upload_task["result"]["form"]["url"]
+    upload_parameters = upload_task["result"]["form"]["parameters"]
+
+    with open(input_path, "rb") as source:
+        upload_response = requests.post(
+            upload_url,
+            data=upload_parameters,
+            files={"file": (filename, source, "video/mp4")},
+            timeout=600,
+        )
+    upload_response.raise_for_status()
+
+    job_id_remote = job["id"]
+    while True:
+        current = requests.get(
+            f"https://api.cloudconvert.com/v2/jobs/{job_id_remote}",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+        current.raise_for_status()
+        data = current.json()["data"]
+        tasks = data.get("tasks", [])
+        convert_task = next(
+            (task for task in tasks if task["name"] == "convert"),
+            None,
+        )
+        percent = int((convert_task or {}).get("percent", 0) or 0)
+        set_compress_job(
+            job_id,
+            progress=min(99, max(1, percent)),
+            message=f"CloudConvert: {percent}% encoded...",
+        )
+
+        local_job = get_compress_job(job_id)
+        if not local_job or local_job.get("cancelled"):
+            requests.post(
+                f"https://api.cloudconvert.com/v2/jobs/{job_id_remote}/cancel",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=30,
+            )
+            return False
+
+        if data["status"] == "finished":
+            export_task = next(
+                task for task in tasks if task["name"] == "export"
+            )
+            output_url = export_task["result"]["files"][0]["url"]
+            with requests.get(output_url, stream=True, timeout=600) as download:
+                download.raise_for_status()
+                with open(output_path, "wb") as output:
+                    for chunk in download.iter_content(1024 * 1024):
+                        if chunk:
+                            output.write(chunk)
+            return True
+
+        if data["status"] == "error":
+            errors = [
+                task.get("message", "CloudConvert task failed.")
+                for task in tasks
+                if task.get("status") == "error"
+            ]
+            raise RuntimeError("; ".join(errors))
+
+        time.sleep(2)
+
+
 def zip_worker(
     job_id,
     file_ids,
@@ -763,49 +882,12 @@ def compress_worker(
                     message=f"Compressing {filename}...",
                 )
 
-                duration_millis = (
-                    metadata.get("videoMediaMetadata", {})
-                    .get("durationMillis", 0)
-                )
-                try:
-                    duration_seconds = float(duration_millis) / 1000
-                    if duration_seconds <= 0:
-                        duration_seconds = 0
-                except (TypeError, ValueError):
-                    duration_seconds = 0
-
-                success = compress_video(
+                success = cloudconvert_video(
                     input_path,
                     output_path,
                     quality,
-                    progress_callback=lambda seconds: set_compress_job(
-                        job_id,
-                        progress=min(
-                            99,
-                            max(
-                                1,
-                                int(
-                                    (
-                                        index - 1
-                                        + (
-                                            min(
-                                                seconds / duration_seconds,
-                                                1,
-                                            )
-                                            if duration_seconds
-                                            else 0
-                                        )
-                                    )
-                                    / total
-                                    * 100
-                                ),
-                            ),
-                        ),
-                        message=(
-                            f"Compressing {filename} "
-                            f"({int(seconds)}s encoded)..."
-                        ),
-                    ),
+                    job_id,
+                    filename,
                 )
 
                 if not success:
