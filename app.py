@@ -520,7 +520,7 @@ def cloudconvert_video(
     job_id,
     filename,
 ):
-    api_key = os.environ.get("CLOUDCONVERT_API_KEY")
+    api_key = os.environ.get("CLOUDCONVERT_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError(
             "CLOUDCONVERT_API_KEY is not configured."
