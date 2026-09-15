@@ -480,7 +480,7 @@ def compress_video(
         "-vf", f"scale='min({height},iw)':-2",
         "-c:v", "libx264",
         "-crf", "26",
-        "-preset", "fast",
+        "-preset", "veryfast",
         "-c:a", "aac",
         "-movflags", "+faststart",
         "-y",
