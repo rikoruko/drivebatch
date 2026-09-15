@@ -574,7 +574,10 @@ def zip_worker(
                 try:
                     metadata = service.files().get(
                         fileId=file_id,
-                        fields="id,name,mimeType,size",
+                        fields=(
+                            "id,name,mimeType,size,"
+                            "videoMediaMetadata(durationMillis)"
+                        ),
                     ).execute()
 
                     filename = safe_name(
@@ -759,6 +762,17 @@ def compress_worker(
                     message=f"Compressing {filename}...",
                 )
 
+                duration_millis = (
+                    metadata.get("videoMediaMetadata", {})
+                    .get("durationMillis", 0)
+                )
+                try:
+                    duration_seconds = float(duration_millis) / 1000
+                    if duration_seconds <= 0:
+                        duration_seconds = 0
+                except (TypeError, ValueError):
+                    duration_seconds = 0
+
                 success = compress_video(
                     input_path,
                     output_path,
@@ -767,7 +781,24 @@ def compress_worker(
                         job_id,
                         progress=min(
                             99,
-                            max(1, int((index - 1) / total * 100)),
+                            max(
+                                1,
+                                int(
+                                    (
+                                        index - 1
+                                        + (
+                                            min(
+                                                seconds / duration_seconds,
+                                                1,
+                                            )
+                                            if duration_seconds
+                                            else 0
+                                        )
+                                    )
+                                    / total
+                                    * 100
+                                ),
+                            ),
                         ),
                         message=(
                             f"Compressing {filename} "
