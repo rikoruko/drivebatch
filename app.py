@@ -9,21 +9,39 @@ import zipfile
 import tempfile
 import threading
 import subprocess
+import static_ffmpeg
+
+
+static_ffmpeg.add_paths()
 
 from flask import (
     Flask, render_template, request, redirect, session, jsonify,
     send_file, Response, stream_with_context
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import AuthorizedSession
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-import static_ffmpeg
-
+from googleapiclient.http import MediaIoBaseDownload
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.secret_key = os.environ.get("SECRET_KEY", "drivebatch-secret")
 
+def download_drive_file(service, file_id, destination_path):
+    request = service.files().get_media(fileId=file_id)
+
+    with open(destination_path, "wb") as f:
+        downloader = MediaIoBaseDownload(
+            f, request, chunksize=1024 * 1024 * 5
+        )  # 5MB chunks
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+
+    return destination_path
+            
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 VIDEO_MIMES = {
@@ -455,7 +473,7 @@ def compress_video(
     ffmpeg_path = static_ffmpeg.get_ffmpeg()
     if isinstance(ffmpeg_path, tuple):
         ffmpeg_path = ffmpeg_path[0]
-    
+
     cmd = [
         ffmpeg_path,
         "-nostdin",
@@ -463,7 +481,7 @@ def compress_video(
         "-progress", "pipe:1",
         "-nostats",
         "-i", input_path,
-        "-vf", f"scale=-2:{height}",
+        "-vf", f"scale='min({height},iw)':-2",
         "-c:v", "libx264",
         "-crf", "26",
         "-preset", "fast",
