@@ -1380,27 +1380,11 @@ function downloadCompressedFile() {
     );
 
 
-  const link =
-    document.createElement("a");
-
-
-  link.href = url;
-
-  link.download =
-    compressIsBatch
-      ? "StreamSaver.zip"
-      : "";
-
-
-  document.body.appendChild(
-    link
-  );
-
-
-  link.click();
-
-
-  link.remove();
+  // The job finishes from a polling callback, so a synthetic anchor click
+  // can be blocked by browsers as an unsolicited download. The endpoint
+  // already returns Content-Disposition: attachment, so navigate directly
+  // to let the browser handle the download.
+  window.location.assign(url);
 
   $("compressProgressModal")
     .classList.add(
