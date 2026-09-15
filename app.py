@@ -427,14 +427,16 @@ def download_drive_file(
     authed_session = AuthorizedSession(credentials)
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
     
-    response = authed_session.get(url, stream=True)
-    if response.status_code != 200:
-        raise RuntimeError(f"HTTP {response.status_code} while downloading file {file_id}")
+    with authed_session.get(url, stream=True) as response:
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"HTTP {response.status_code} while downloading file {file_id}"
+            )
 
-    with open(output_path, "wb") as output:
-        for chunk in response.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                output.write(chunk)
+        with open(output_path, "wb") as output:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    output.write(chunk)
 
 
 def compress_video(input_path, output_path, quality):
@@ -451,6 +453,8 @@ def compress_video(input_path, output_path, quality):
     
     cmd = [
         ffmpeg_path,
+        "-nostdin",
+        "-loglevel", "error",
         "-i", input_path,
         "-vf", f"scale=-2:{height}",
         "-c:v", "libx264",
@@ -463,7 +467,13 @@ def compress_video(input_path, output_path, quality):
     ]
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
         return result.returncode == 0
     except Exception:
         return False
