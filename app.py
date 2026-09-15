@@ -560,7 +560,7 @@ def cloudconvert_video(
                     "operation": "convert",
                     "input": "upload",
                     "output_format": "mp4",
-                    "video_codec": "h264",
+                    "video_codec": "x264",
                     "height": height,
                     "preset": "veryfast",
                     "crf": 26,
