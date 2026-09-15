@@ -9,6 +9,7 @@ import zipfile
 import tempfile
 import threading
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import static_ffmpeg
 import requests
 
@@ -519,6 +520,8 @@ def cloudconvert_video(
     quality,
     job_id,
     filename,
+    file_index,
+    total_files,
 ):
     api_key = os.environ.get("CLOUDCONVERT_API_KEY", "").strip()
     if not api_key:
@@ -583,6 +586,17 @@ def cloudconvert_video(
     upload_parameters = upload_task["result"]["form"]["parameters"]
 
     with open(input_path, "rb") as source:
+        set_compress_job(
+            job_id,
+            progress=max(
+                get_compress_job(job_id).get("progress", 0),
+                int((file_index - 1) / total_files * 100),
+            ),
+            message=(
+                f"Video {file_index} / {total_files}: "
+                "uploading to CloudConvert..."
+            ),
+        )
         upload_response = requests.post(
             upload_url,
             data=upload_parameters,
@@ -606,10 +620,28 @@ def cloudconvert_video(
             None,
         )
         percent = int((convert_task or {}).get("percent", 0) or 0)
+        overall_progress = min(
+            99,
+            max(
+                1,
+                int(
+                    ((file_index - 1) + percent / 100)
+                    / total_files
+                    * 100
+                ),
+            ),
+        )
+        current_job = get_compress_job(job_id)
         set_compress_job(
             job_id,
-            progress=min(99, max(1, percent)),
-            message=f"CloudConvert: {percent}% encoded...",
+            progress=max(
+                current_job.get("progress", 0) if current_job else 0,
+                overall_progress,
+            ),
+            message=(
+                f"Video {file_index} / {total_files}: "
+                f"CloudConvert {percent}% encoded..."
+            ),
         )
 
         local_job = get_compress_job(job_id)
@@ -645,6 +677,65 @@ def cloudconvert_video(
         time.sleep(2)
 
 
+def compress_one_video(
+    job_id,
+    file_id,
+    credentials,
+    quality,
+    file_index,
+    total_files,
+    temp_dir,
+):
+    service = build(
+        "drive",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
+    metadata = service.files().get(
+        fileId=file_id,
+        fields="id,name,mimeType,size",
+    ).execute()
+    filename = safe_name(
+        metadata.get("name", f"video_{file_index}")
+    )
+    if not filename.endswith(".mp4"):
+        filename += ".mp4"
+
+    input_path = os.path.join(
+        temp_dir,
+        f"input_{file_index}_{filename}",
+    )
+    output_path = os.path.join(
+        temp_dir,
+        f"output_{file_index}_{filename}",
+    )
+    set_compress_job(
+        job_id,
+        message=f"Video {file_index} / {total_files}: downloading {filename}...",
+    )
+    download_drive_file(credentials, file_id, input_path)
+    set_compress_job(
+        job_id,
+        message=f"Video {file_index} / {total_files}: starting conversion...",
+    )
+    if not cloudconvert_video(
+        input_path,
+        output_path,
+        quality,
+        job_id,
+        filename,
+        file_index,
+        total_files,
+    ):
+        raise RuntimeError(f"Failed to compress {filename}")
+    try:
+        os.remove(input_path)
+    except OSError:
+        pass
+    return file_index, output_path
+
+
 def zip_worker(
     job_id,
     file_ids,
@@ -662,13 +753,6 @@ def zip_worker(
     set_job(job_id, temp_dir=temp_dir)
 
     try:
-        service = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
-        )
-
         total = len(file_ids)
 
         set_job(
@@ -835,105 +919,50 @@ def compress_worker(
             message="Starting compression...",
         )
 
-        output_files = []
-
-        for index, file_id in enumerate(
-            file_ids,
-            start=1
-        ):
-            job = get_compress_job(job_id)
-
-            if not job:
-                return
-
-            if job.get("cancelled"):
-                set_compress_job(
+        output_files = [None] * total
+        workers = min(3, total)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    compress_one_video,
                     job_id,
-                    status="cancelled",
-                    message="Compression cancelled.",
-                )
-                return
-
-            try:
-                metadata = service.files().get(
-                    fileId=file_id,
-                    fields="id,name,mimeType,size",
-                ).execute()
-
-                filename = safe_name(
-                    metadata.get(
-                        "name",
-                        f"video_{index}"
-                    )
-                )
-
-                if not filename.endswith('.mp4'):
-                    filename += '.mp4'
-
-                input_path = os.path.join(
-                    temp_dir,
-                    f"input_{index}_{filename}"
-                )
-
-                output_path = os.path.join(
-                    temp_dir,
-                    f"output_{index}_{filename}"
-                )
-
-                set_compress_job(
-                    job_id,
-                    message=f"Downloading {filename}...",
-                )
-
-                download_drive_file(
-                    credentials,
                     file_id,
-                    input_path,
-                )
-
-                set_compress_job(
-                    job_id,
-                    message=f"Compressing {filename}...",
-                )
-
-                success = cloudconvert_video(
-                    input_path,
-                    output_path,
+                    credentials,
                     quality,
-                    job_id,
-                    filename,
-                )
-
-                if not success:
-                    raise RuntimeError(
-                        f"Failed to compress {filename}"
-                    )
-
-                output_files.append(output_path)
-
+                    index,
+                    total,
+                    temp_dir,
+                ): index
+                for index, file_id in enumerate(file_ids, start=1)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
                 try:
-                    os.remove(input_path)
-                except Exception:
-                    pass
+                    _, output_path = future.result()
+                    output_files[index - 1] = output_path
+                    completed = sum(
+                        output_file is not None
+                        for output_file in output_files
+                    )
+                    set_compress_job(
+                        job_id,
+                        completed=completed,
+                        progress=max(
+                            get_compress_job(job_id).get("progress", 0),
+                            int(completed / total * 100),
+                        ),
+                        message=f"{completed} / {total} videos ready",
+                    )
+                except Exception as exc:
+                    set_compress_job(
+                        job_id,
+                        status="error",
+                        error=f"Could not compress video {index}: {exc}",
+                    )
+                    return
 
-                progress = int(
-                    index / total * 100
-                )
-
-                set_compress_job(
-                    job_id,
-                    completed=index,
-                    progress=progress,
-                    message=f"{index} / {total} videos",
-                )
-
-            except Exception as exc:
-                set_compress_job(
-                    job_id,
-                    status="error",
-                    error=f"Could not compress video {index}: {exc}",
-                )
-                return
+        if any(output_file is None for output_file in output_files):
+            raise RuntimeError("One or more videos did not produce an output.")
 
         is_batch = len(file_ids) > 1
 
