@@ -465,6 +465,7 @@ def compress_video(
 ):
     quality_map = {
         "360p": 360,
+        "480p": 480,
         "720p": 720,
         "1080p": 1080
     }
@@ -904,6 +905,8 @@ def start_download():
             "file_ids",
             data.get("ids", [])
         )
+        if not file_ids and data.get("file_id"):
+            file_ids = [data["file_id"]]
 
         if not isinstance(file_ids, list):
             return jsonify({
@@ -931,6 +934,7 @@ def start_download():
         with DOWNLOAD_LOCK:
             DOWNLOAD_JOBS[job_id] = {
                 "status": "queued",
+                "quality": quality,
                 "total": len(file_ids),
                 "completed": 0,
                 "progress": 0,
@@ -978,6 +982,7 @@ def download_status(job_id):
 
     response = {
         "status": job.get("status"),
+        "quality": job.get("quality"),
         "total": job.get("total", 0),
         "completed": job.get("completed", 0),
         "progress": job.get("progress", 0),
@@ -1049,6 +1054,7 @@ def cancel_download(job_id):
     })
 
 
+@app.route("/api/variants/start", methods=["POST"])
 @app.route("/api/compress/start", methods=["POST"])
 def start_compress():
     try:
@@ -1067,12 +1073,14 @@ def start_compress():
             "file_ids",
             data.get("ids", [])
         )
+        if not file_ids and data.get("file_id"):
+            file_ids = [data["file_id"]]
 
         quality = data.get("quality", "720p")
 
-        if quality not in ["360p", "720p", "1080p"]:
+        if quality not in ["360p", "480p", "720p", "1080p"]:
             return jsonify({
-                "error": "Invalid quality. Choose 360p, 720p, or 1080p."
+                "error": "Invalid quality. Choose 360p, 480p, 720p, or 1080p."
             }), 400
 
         if not isinstance(file_ids, list):
@@ -1126,11 +1134,21 @@ def start_compress():
 
         worker.start()
 
-        return jsonify({
+        response = {
             "success": True,
             "job_id": job_id,
             "is_batch": len(file_ids) > 1,
-        })
+            "quality": quality,
+        }
+        if len(file_ids) == 1:
+            response["status_url"] = (
+                f"/api/variants/status/{job_id}"
+            )
+            response["download_url"] = (
+                f"/api/variants/download/{job_id}"
+            )
+
+        return jsonify(response)
 
     except Exception as exc:
         return jsonify({
@@ -1138,6 +1156,7 @@ def start_compress():
         }), 500
 
 
+@app.route("/api/variants/status/<job_id>")
 @app.route("/api/compress/status/<job_id>")
 def compress_status(job_id):
     job = get_compress_job(job_id)
@@ -1160,10 +1179,128 @@ def compress_status(job_id):
 
     if job.get("status") == "done":
         response["ready"] = True
+        if job.get("file_path"):
+            response["download_url"] = (
+                f"/api/variants/download/{job_id}"
+            )
 
     return jsonify(response)
 
 
+@app.route(
+    "/api/variants/cancel/<job_id>",
+    methods=["POST"],
+)
+@app.route(
+    "/api/compress/cancel/<job_id>",
+    methods=["POST"],
+)
+def cancel_compress(job_id):
+    job = get_compress_job(job_id)
+
+    if not job:
+        return jsonify({
+            "error": "Compression job not found."
+        }), 404
+
+    set_compress_job(
+        job_id,
+        cancelled=True,
+        status="cancelled",
+        message="Compression cancelled.",
+    )
+
+    return jsonify({"success": True})
+
+
+def stream_local_file(path, filename, mimetype):
+    file_size = os.path.getsize(path)
+    range_header = request.headers.get("Range")
+    chunk_number = request.args.get("chunk")
+    chunk_size = 25 * 1024 * 1024
+    start = 0
+    end = file_size - 1
+    status = 200
+
+    if not range_header and chunk_number is not None:
+        try:
+            chunk_index = int(chunk_number)
+        except ValueError:
+            chunk_index = -1
+
+        if chunk_index < 0:
+            return Response(status=416)
+
+        start = chunk_index * chunk_size
+        end = min(start + chunk_size - 1, file_size - 1)
+        if start >= file_size:
+            return Response(
+                status=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        status = 206
+
+    if range_header:
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if not match:
+            return Response(
+                status=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+
+        requested_start, requested_end = match.groups()
+        if requested_start:
+            start = int(requested_start)
+            if requested_end:
+                end = int(requested_end)
+        elif requested_end:
+            length = int(requested_end)
+            start = max(file_size - length, 0)
+
+        if start >= file_size or start > end:
+            return Response(
+                status=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+
+        end = min(end, file_size - 1)
+        status = 206
+
+    content_length = end - start + 1
+
+    def generate():
+        with open(path, "rb") as source:
+            source.seek(start)
+            remaining = content_length
+            while remaining:
+                chunk = source.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(content_length),
+        "Content-Disposition": (
+            f'attachment; filename="{safe_name(filename)}"'
+        ),
+        "Cache-Control": "private, max-age=3600",
+    }
+    if status == 206:
+        headers["Content-Range"] = (
+            f"bytes {start}-{end}/{file_size}"
+        )
+
+    return Response(
+        stream_with_context(generate()),
+        status=status,
+        mimetype=mimetype,
+        headers=headers,
+    )
+
+
+@app.route("/api/variants/download/<job_id>")
 @app.route("/api/compress/file/<job_id>")
 def compress_file(job_id):
     job = get_compress_job(job_id)
@@ -1190,12 +1327,10 @@ def compress_file(job_id):
             max_age=0,
         )
     elif file_path and os.path.exists(file_path):
-        return send_file(
+        return stream_local_file(
             file_path,
-            mimetype="video/mp4",
-            as_attachment=True,
-            download_name=os.path.basename(file_path),
-            max_age=0,
+            os.path.basename(file_path),
+            "video/mp4",
         )
     else:
         return jsonify({
