@@ -439,7 +439,12 @@ def download_drive_file(
                     output.write(chunk)
 
 
-def compress_video(input_path, output_path, quality):
+def compress_video(
+    input_path,
+    output_path,
+    quality,
+    progress_callback=None,
+):
     quality_map = {
         "360p": 360,
         "720p": 720,
@@ -455,6 +460,8 @@ def compress_video(input_path, output_path, quality):
         ffmpeg_path,
         "-nostdin",
         "-loglevel", "error",
+        "-progress", "pipe:1",
+        "-nostats",
         "-i", input_path,
         "-vf", f"scale=-2:{height}",
         "-c:v", "libx264",
@@ -467,15 +474,26 @@ def compress_video(input_path, output_path, quality):
     ]
     
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            check=False,
+            text=True,
         )
-        return result.returncode == 0
+
+        for line in process.stdout or ():
+            if progress_callback and line.startswith("out_time_ms="):
+                try:
+                    progress_callback(int(line.split("=", 1)[1]) / 1000000)
+                except (TypeError, ValueError):
+                    pass
+
+        return process.wait() == 0
     except Exception:
+        if "process" in locals() and process.poll() is None:
+            process.kill()
+            process.wait()
         return False
 
 
@@ -731,6 +749,17 @@ def compress_worker(
                     input_path,
                     output_path,
                     quality,
+                    progress_callback=lambda seconds: set_compress_job(
+                        job_id,
+                        progress=min(
+                            99,
+                            max(1, int((index - 1) / total * 100)),
+                        ),
+                        message=(
+                            f"Compressing {filename} "
+                            f"({int(seconds)}s encoded)..."
+                        ),
+                    ),
                 )
 
                 if not success:
