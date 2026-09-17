@@ -93,6 +93,7 @@ DOWNLOAD_LOCK = threading.Lock()
 COMPRESS_JOBS = {}
 COMPRESS_LOCK = threading.Lock()
 GCS_BUCKET = os.environ.get("GCS_BUCKET", "").strip()
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "").strip()
 
 
 def artifact_bucket():
@@ -209,15 +210,23 @@ def credentials_copy():
 def drive_service():
     credentials = credentials_from_session()
 
-    if not credentials:
-        return None
+    if credentials:
+        return build(
+            "drive",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
 
-    return build(
-        "drive",
-        "v3",
-        credentials=credentials,
-        cache_discovery=False,
-    )
+    if GOOGLE_API_KEY:
+        return build(
+            "drive",
+            "v3",
+            developerKey=GOOGLE_API_KEY,
+            cache_discovery=False,
+        )
+
+    return None
 
 
 def extract_folder_id(url):
@@ -485,7 +494,7 @@ def api_scan():
 
         if not service:
             return jsonify({
-                "error": "Please connect Google Drive first."
+                "error": "Please connect Google Drive, or configure GOOGLE_API_KEY for public folders."
             }), 401
 
         data = request.get_json(
@@ -563,10 +572,20 @@ def download_drive_file(
     file_id,
     output_path,
 ):
-    authed_session = AuthorizedSession(credentials)
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-    
-    with authed_session.get(url, stream=True) as response:
+    if credentials:
+        response = AuthorizedSession(credentials).get(url, stream=True)
+    else:
+        if not GOOGLE_API_KEY:
+            raise RuntimeError("Google Drive login is required to download this file.")
+        response = requests.get(
+            url,
+            params={"key": GOOGLE_API_KEY},
+            stream=True,
+            timeout=600,
+        )
+
+    with response:
         if response.status_code != 200:
             raise RuntimeError(
                 f"HTTP {response.status_code} while downloading file {file_id}"
@@ -805,11 +824,20 @@ def compress_one_video(
     total_files,
     temp_dir,
 ):
-    service = build(
-        "drive",
-        "v3",
-        credentials=credentials,
-        cache_discovery=False,
+    service = (
+        build(
+            "drive",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
+        if credentials
+        else build(
+            "drive",
+            "v3",
+            developerKey=GOOGLE_API_KEY,
+            cache_discovery=False,
+        )
     )
     metadata = service.files().get(
         fileId=file_id,
@@ -872,11 +900,20 @@ def zip_worker(
     set_job(job_id, temp_dir=temp_dir)
 
     try:
-        service = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
+        service = (
+            build(
+                "drive",
+                "v3",
+                credentials=credentials,
+                cache_discovery=False,
+            )
+            if credentials
+            else build(
+                "drive",
+                "v3",
+                developerKey=GOOGLE_API_KEY,
+                cache_discovery=False,
+            )
         )
         total = len(file_ids)
 
@@ -1157,9 +1194,9 @@ def start_download():
     try:
         credentials = credentials_copy()
 
-        if not credentials:
+        if not credentials and not GOOGLE_API_KEY:
             return jsonify({
-                "error": "Please connect Google Drive first."
+                "error": "Please connect Google Drive, or use a public folder with public access configured."
             }), 401
 
         data = request.get_json(
@@ -1728,15 +1765,20 @@ def compress_file(job_id):
 def stream_drive_file(file_id, as_attachment=False):
     credentials = credentials_from_session()
 
-    if not credentials:
+    if not credentials and not GOOGLE_API_KEY:
         return jsonify({
-            "error": "Please connect Google Drive first."
+            "error": "Please connect Google Drive, or configure public-folder access."
         }), 401
 
-    authed_session = AuthorizedSession(credentials)
+    authed_session = (
+        AuthorizedSession(credentials)
+        if credentials
+        else requests.Session()
+    )
 
     meta_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?fields=name,mimeType,size"
-    meta_res = authed_session.get(meta_url)
+    request_params = None if credentials else {"key": GOOGLE_API_KEY}
+    meta_res = authed_session.get(meta_url, params=request_params)
 
     if meta_res.status_code != 200:
         return jsonify({
@@ -1755,8 +1797,10 @@ def stream_drive_file(file_id, as_attachment=False):
 
     drive_res = authed_session.get(
         media_url,
+        params=request_params,
         headers=req_headers,
-        stream=True
+        stream=True,
+        timeout=600,
     )
 
     if drive_res.status_code not in (200, 206):

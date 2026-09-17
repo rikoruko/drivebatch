@@ -13,7 +13,7 @@ and `cloud-run.yaml`.
    `europe-west3`.
 4. Create a private Cloud Storage bucket and set its name as `GCS_BUCKET`.
 5. Create Secret Manager secrets named `google-client-secret-json`,
-   `drivebatch-secret-key`, and `cloudconvert-api-key`.
+   `drivebatch-secret-key`, `cloudconvert-api-key`, and `google-api-key`.
 6. Build the image:
 
    ```text
@@ -28,11 +28,15 @@ and `cloud-run.yaml`.
    ```
 
 The Cloud Run service account needs `Storage Object Admin` on the bucket and
-`Secret Manager Secret Accessor` on the three secrets. The service is currently
+`Secret Manager Secret Accessor` on the four secrets. The service is currently
 limited to one instance because job status is still held in process memory.
 Cloud Storage preserves generated ZIPs and compressed files when the instance
 restarts. A later Redis or database migration can remove the one-instance
 limit.
+
+`GOOGLE_API_KEY` is optional. If configured, users can scan and download files
+from folders shared as "Anyone with the link" without signing in. Private Drive
+folders, compression, and saving results back to Drive still require OAuth.
 
 ## Custom domain and OAuth
 
