@@ -21,6 +21,14 @@
       Connect Google Drive
     </a>
 
+    <a
+      class="connect hidden"
+      id="driveLogoutBtn"
+      href="/logout"
+    >
+      Log out
+    </a>
+
     <button id="menuBtn">☰</button>
   </div>
 </header>
@@ -564,8 +572,21 @@
 
 const $ = id =>
   document.getElementById(id);
+
+const authError =
+  new URLSearchParams(window.location.search).get("auth_error");
+
+if (authError === "scope") {
+  alert(
+    "Google authorization was not completed. Please try Connect Google Drive again and approve the requested permissions."
+  );
+  window.history.replaceState({}, document.title, "/");
+}
+
 const driveConnectBtn =
   document.getElementById("driveConnectBtn");
+const driveLogoutBtn =
+  document.getElementById("driveLogoutBtn");
 
 if (driveConnectBtn) {
   fetch("/api/auth/status", {
@@ -579,6 +600,8 @@ if (driveConnectBtn) {
 
         driveConnectBtn.href =
           "/logout";
+        driveConnectBtn.classList.add("hidden");
+        driveLogoutBtn.classList.remove("hidden");
       }
     });
 }
@@ -629,8 +652,12 @@ async function updateDriveStatus() {
 
     if (data.connected === true) {
       button.textContent = "🟢 Google Drive Connected";
-      button.href = "/logout";
-      button.title = "Click to disconnect Google Drive";
+      button.title = "Google Drive is connected";
+      button.classList.add("hidden");
+      driveLogoutBtn.classList.remove("hidden");
+    } else {
+      button.classList.remove("hidden");
+      driveLogoutBtn.classList.add("hidden");
     }
   } catch (error) {
     console.error("Drive status check failed:", error);

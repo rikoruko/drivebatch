@@ -410,7 +410,7 @@ def login():
     authorization_url, state = (
         flow.authorization_url(
             access_type="offline",
-            include_granted_scopes="true",
+            include_granted_scopes="false",
             prompt="consent",
         )
     )
@@ -425,6 +425,10 @@ def login():
 @app.route("/oauth2callback")
 def oauth_callback():
     try:
+        if request.args.get("error"):
+            session.pop("oauth_state", None)
+            return redirect("/")
+
         state = session.get("oauth_state")
 
         flow = make_flow(state=state)
@@ -452,12 +456,10 @@ def oauth_callback():
 
         return redirect("/")
 
-    except Exception as exc:
-        return (
-            "Google connection failed: "
-            + str(exc),
-            500
-        )
+    except Exception:
+        session.pop("google_token", None)
+        session.pop("oauth_state", None)
+        return redirect("/?auth_error=scope")
 
 
 @app.route("/logout")
