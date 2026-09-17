@@ -926,9 +926,11 @@ function renderVideos() {
 
           <button
             class="preview-button"
+            type="button"
+            aria-label="Preview ${escapeHtml(video.name)}"
             onclick="openPreview('${escapeHtml(id)}')"
           >
-            ▶
+            <span aria-hidden="true">▶</span>
           </button>
 
 

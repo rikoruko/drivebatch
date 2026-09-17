@@ -406,18 +406,29 @@ main{
 }
 
 .preview-button{
-  width:58px;
-  height:45px;
+  width:46px;
+  height:46px;
   flex:none;
-  border:0;
-  border-radius:10px;
-  background:#191d28;
+  display:grid;
+  place-items:center;
+  border:1px solid #6654bd;
+  border-radius:50%;
+  background:linear-gradient(145deg,#30245f,#17152d);
   color:#fff;
-  font-size:16px;
+  font-size:15px;
+  padding-left:2px;
+  box-shadow:0 5px 16px #0005;
+  cursor:pointer;
 }
 
 .preview-button:hover{
-  background:#252a38;
+  border-color:#a08cff;
+  background:linear-gradient(145deg,#4d3d8d,#211b43);
+}
+
+.preview-button:focus-visible{
+  outline:2px solid #b4a8ff;
+  outline-offset:3px;
 }
 
 .video-info{
