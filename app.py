@@ -17,15 +17,11 @@ import requests
 static_ffmpeg.add_paths()
 
 from flask import (
-    Flask, render_template, request, redirect, session, jsonify,
+    Flask, render_template, request, jsonify,
     send_file, Response, stream_with_context
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import AuthorizedSession
-from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from google.cloud import storage
 
 app = Flask(__name__)
@@ -34,24 +30,6 @@ app.secret_key = os.environ.get("SECRET_KEY", "drivebatch-secret")
 app.config["JSON_SORT_KEYS"] = False
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
 app.config["PREFERRED_URL_SCHEME"] = "https" if os.environ.get("FLASK_ENV") == "production" else "http"
-
-def download_drive_file(service, file_id, destination_path):
-    request = service.files().get_media(fileId=file_id)
-
-    with open(destination_path, "wb") as f:
-        downloader = MediaIoBaseDownload(
-            f, request, chunksize=1024 * 1024 * 5
-        )  # 5MB chunks
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-
-    return destination_path
-            
-# Saving generated files to a user-selected Drive folder requires write access.
-# Existing read-only sessions must sign in again after this scope changes.
-SCOPES = ["https://www.googleapis.com/auth/drive"]
-OAUTH_SCOPE_VERSION = 2
 
 VIDEO_MIMES = {
     "video/mp4",
@@ -129,95 +107,7 @@ def materialize_artifact(job, key, suffix):
     return temporary.name, True
 
 
-def client_config():
-    raw = os.environ.get("GOOGLE_CLIENT_SECRET_JSON")
-
-    if not raw:
-        raise RuntimeError(
-            "GOOGLE_CLIENT_SECRET_JSON is not configured."
-        )
-
-    return json.loads(raw)
-
-
-def redirect_uri():
-    value = os.environ.get("OAUTH_REDIRECT_URI")
-
-    if not value:
-        raise RuntimeError(
-            "OAUTH_REDIRECT_URI is not configured."
-        )
-
-    return value
-
-
-def make_flow(state=None):
-    return Flow.from_client_config(
-        client_config(),
-        scopes=SCOPES,
-        redirect_uri=redirect_uri(),
-        state=state,
-    )
-
-
-def credentials_from_session():
-    data = session.get("google_token")
-
-    if not data:
-        return None
-
-    if data.get("scope_version") != OAUTH_SCOPE_VERSION:
-        return None
-
-    try:
-        return Credentials(
-            token=data["token"],
-            refresh_token=data.get("refresh_token"),
-            token_uri=data.get(
-                "token_uri",
-                "https://oauth2.googleapis.com/token"
-            ),
-            client_id=data.get("client_id"),
-            client_secret=data.get("client_secret"),
-            scopes=data.get("scopes", SCOPES),
-        )
-    except Exception:
-        return None
-
-
-def credentials_copy():
-    data = session.get("google_token")
-
-    if not data:
-        return None
-
-    if data.get("scope_version") != OAUTH_SCOPE_VERSION:
-        return None
-
-    return Credentials(
-        token=data["token"],
-        refresh_token=data.get("refresh_token"),
-        token_uri=data.get(
-            "token_uri",
-            "https://oauth2.googleapis.com/token"
-        ),
-        client_id=data.get("client_id"),
-        client_secret=data.get("client_secret"),
-        scopes=data.get("scopes", SCOPES),
-    )
-
-
 def drive_service():
-    credentials = credentials_from_session()
-
-    if credentials:
-        return build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
-        )
-
     if GOOGLE_API_KEY:
         return build(
             "drive",
@@ -412,79 +302,9 @@ def terms():
     return render_template("terms.html")
 
 
-@app.route("/login")
-def login():
-    flow = make_flow()
-
-    authorization_url, state = (
-        flow.authorization_url(
-            access_type="offline",
-            include_granted_scopes="false",
-            prompt="consent",
-        )
-    )
-
-    session["oauth_state"] = state
-
-    return redirect(
-        authorization_url
-    )
-
-
-@app.route("/oauth2callback")
-def oauth_callback():
-    try:
-        if request.args.get("error"):
-            session.pop("oauth_state", None)
-            return redirect("/")
-
-        state = session.get("oauth_state")
-
-        flow = make_flow(state=state)
-
-        flow.fetch_token(
-            authorization_response=request.url
-        )
-
-        credentials = flow.credentials
-
-        session["google_token"] = {
-            "token": credentials.token,
-            "refresh_token": credentials.refresh_token,
-            "token_uri": credentials.token_uri,
-            "client_id": credentials.client_id,
-            "client_secret": credentials.client_secret,
-            "scopes": credentials.scopes,
-            "scope_version": OAUTH_SCOPE_VERSION,
-        }
-
-        session.pop(
-            "oauth_state",
-            None
-        )
-
-        return redirect("/")
-
-    except Exception:
-        session.pop("google_token", None)
-        session.pop("oauth_state", None)
-        return redirect("/?auth_error=scope")
-
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/")
-
-
 @app.route("/api/auth/status")
 def auth_status():
-    return jsonify({
-        "connected": (
-            credentials_from_session()
-            is not None
-        )
-    })
+    return jsonify({"connected": False, "public_only": True})
 
 
 @app.route("/api/scan", methods=["POST"])
@@ -494,7 +314,7 @@ def api_scan():
 
         if not service:
             return jsonify({
-                "error": "Please connect Google Drive, or configure GOOGLE_API_KEY for public folders."
+                "error": "Public Google Drive access is not configured."
             }), 401
 
         data = request.get_json(
@@ -573,17 +393,14 @@ def download_drive_file(
     output_path,
 ):
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-    if credentials:
-        response = AuthorizedSession(credentials).get(url, stream=True)
-    else:
-        if not GOOGLE_API_KEY:
-            raise RuntimeError("Google Drive login is required to download this file.")
-        response = requests.get(
-            url,
-            params={"key": GOOGLE_API_KEY},
-            stream=True,
-            timeout=600,
-        )
+    if not GOOGLE_API_KEY:
+        raise RuntimeError("Public Google Drive access is not configured.")
+    response = requests.get(
+        url,
+        params={"key": GOOGLE_API_KEY},
+        stream=True,
+        timeout=600,
+    )
 
     with response:
         if response.status_code != 200:
@@ -824,21 +641,9 @@ def compress_one_video(
     total_files,
     temp_dir,
 ):
-    service = (
-        build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
-        )
-        if credentials
-        else build(
-            "drive",
-            "v3",
-            developerKey=GOOGLE_API_KEY,
-            cache_discovery=False,
-        )
-    )
+    service = drive_service()
+    if not service:
+        raise RuntimeError("Public Google Drive access is not configured.")
     metadata = service.files().get(
         fileId=file_id,
         fields="id,name,mimeType,size",
@@ -900,21 +705,9 @@ def zip_worker(
     set_job(job_id, temp_dir=temp_dir)
 
     try:
-        service = (
-            build(
-                "drive",
-                "v3",
-                credentials=credentials,
-                cache_discovery=False,
-            )
-            if credentials
-            else build(
-                "drive",
-                "v3",
-                developerKey=GOOGLE_API_KEY,
-                cache_discovery=False,
-            )
-        )
+        service = drive_service()
+        if not service:
+            raise RuntimeError("Public Google Drive access is not configured.")
         total = len(file_ids)
 
         set_job(
@@ -1185,11 +978,10 @@ def compress_worker(
 @app.route("/api/download/start", methods=["POST"])
 def start_download():
     try:
-        credentials = credentials_copy()
-
-        if not credentials and not GOOGLE_API_KEY:
+        credentials = None
+        if not GOOGLE_API_KEY:
             return jsonify({
-                "error": "Please connect Google Drive, or use a public folder with public access configured."
+                "error": "Public Google Drive access is not configured."
             }), 401
 
         data = request.get_json(
@@ -1331,106 +1123,6 @@ def download_zip(job_id):
             ).start()
 
 
-@app.route("/api/save-to-drive", methods=["POST"])
-def save_to_drive():
-    try:
-        credentials = credentials_copy()
-
-        if not credentials:
-            return jsonify({
-                "error": "Please connect Google Drive first."
-            }), 401
-
-        data = request.get_json(silent=True) or {}
-
-        job_id = str(data.get("job_id", "")).strip()
-        job_type = str(data.get("job_type", "download")).strip().lower()
-        folder_url = str(data.get("folder_url", "")).strip()
-        custom_name = str(data.get("filename", "")).strip() or None
-
-        if not job_id:
-            return jsonify({
-                "error": "A job id is required."
-            }), 400
-
-        if job_type == "download":
-            job = get_job(job_id)
-        elif job_type == "compress":
-            job = get_compress_job(job_id)
-        else:
-            return jsonify({
-                "error": "job_type must be download or compress."
-            }), 400
-
-        if not job:
-            return jsonify({
-                "error": "Job not found."
-            }), 404
-
-        target_key = "zip_path" if (
-            job.get("zip_path") or job.get("zip_path_object")
-        ) else "file_path"
-        target_path, temporary = materialize_artifact(
-            job,
-            target_key,
-            ".zip" if target_key == "zip_path" else ".mp4",
-        )
-        if not target_path:
-            return jsonify({
-                "error": "The output file is not available to save."
-            }), 409
-
-        folder_id = None
-        if folder_url:
-            folder_id = extract_folder_id(folder_url)
-            if not folder_id:
-                return jsonify({
-                    "error": "Could not find a valid Google Drive folder in that link."
-                }), 400
-
-        service = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
-        )
-
-        filename = custom_name or os.path.basename(target_path)
-        metadata = {"name": filename}
-        if folder_id:
-            metadata["parents"] = [folder_id]
-
-        media = MediaFileUpload(
-            target_path,
-            resumable=True,
-            mimetype="application/zip" if filename.lower().endswith(".zip") else "application/octet-stream",
-        )
-
-        result = service.files().create(
-            body=metadata,
-            media_body=media,
-            fields="id,name,webViewLink",
-        ).execute()
-
-        response = {
-            "success": True,
-            "file_id": result.get("id"),
-            "name": result.get("name"),
-            "link": result.get("webViewLink"),
-        }
-        if temporary:
-            try:
-                os.remove(target_path)
-            except OSError:
-                pass
-        return jsonify(response)
-
-    except Exception as exc:
-        return jsonify({
-            "error": str(exc)
-        }), 500
-
-
 @app.route(
     "/api/download/cancel/<job_id>",
     methods=["POST"]
@@ -1459,11 +1151,10 @@ def cancel_download(job_id):
 @app.route("/api/compress/start", methods=["POST"])
 def start_compress():
     try:
-        credentials = credentials_copy()
-
-        if not credentials and not GOOGLE_API_KEY:
+        credentials = None
+        if not GOOGLE_API_KEY:
             return jsonify({
-                "error": "Please connect Google Drive, or use a public folder with public access configured."
+                "error": "Public Google Drive access is not configured."
             }), 401
 
         data = request.get_json(
@@ -1756,22 +1447,16 @@ def compress_file(job_id):
 
 
 def stream_drive_file(file_id, as_attachment=False):
-    credentials = credentials_from_session()
-
-    if not credentials and not GOOGLE_API_KEY:
+    if not GOOGLE_API_KEY:
         return jsonify({
-            "error": "Please connect Google Drive, or configure public-folder access."
+            "error": "Public Google Drive access is not configured."
         }), 401
 
-    authed_session = (
-        AuthorizedSession(credentials)
-        if credentials
-        else requests.Session()
-    )
+    drive_session = requests.Session()
 
     meta_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?fields=name,mimeType,size"
-    request_params = None if credentials else {"key": GOOGLE_API_KEY}
-    meta_res = authed_session.get(meta_url, params=request_params)
+    request_params = {"key": GOOGLE_API_KEY}
+    meta_res = drive_session.get(meta_url, params=request_params)
 
     if meta_res.status_code != 200:
         return jsonify({
@@ -1788,7 +1473,7 @@ def stream_drive_file(file_id, as_attachment=False):
     if range_header:
         req_headers["Range"] = range_header
 
-    drive_res = authed_session.get(
+    drive_res = drive_session.get(
         media_url,
         params=request_params,
         headers=req_headers,

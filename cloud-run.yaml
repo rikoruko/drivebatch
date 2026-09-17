@@ -28,18 +28,11 @@ spec:
                 secretKeyRef:
                   name: google-api-key
                   key: latest
-            - name: GOOGLE_CLIENT_SECRET_JSON
-              valueFrom:
-                secretKeyRef:
-                  name: google-client-secret-json
-                  key: latest
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: drivebatch-secret-key
                   key: latest
-            - name: OAUTH_REDIRECT_URI
-              value: REPLACE_WITH_PUBLIC_CALLBACK_URL
             - name: CLOUDCONVERT_API_KEY
               valueFrom:
                 secretKeyRef:

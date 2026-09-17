@@ -17,22 +17,6 @@
   </a>
 
   <div class="header-actions">
-    <a
-      class="connect"
-      id="driveConnectBtn"
-      href="/login"
-    >
-      Connect Google Drive
-    </a>
-
-    <a
-      class="connect hidden"
-      id="driveLogoutBtn"
-      href="/logout"
-    >
-      Log out
-    </a>
-
     <button id="menuBtn">☰</button>
   </div>
 </header>
@@ -57,9 +41,7 @@
     and download one or many at once.
   </p>
 
-  <a class="hero-connect" id="heroDriveConnectBtn" href="/login">
-    Connect Google Drive →
-  </a>
+  <p class="hero-connect connected">Public folders, no login required</p>
 </section>
 
 
@@ -107,7 +89,7 @@
 
 
   <div class="hint">
-    Nested folders are scanned automatically. Connect Google Drive when you want to save downloads back into Drive.
+    Nested folders are scanned automatically. Folders must be shared as “Anyone with the link” → “Viewer”.
   </div>
 
   <a
@@ -372,18 +354,6 @@
       ↓ Download individually
     </button>
 
-    <button
-      class="secondary full"
-      id="saveSelectedToDriveBtn"
-    >
-      ☁ Save ZIP to Google Drive
-    </button>
-
-    <p class="modal-note">
-      Saving to Drive requires Google authorization. The selected files are
-      packaged as a ZIP before upload.
-    </p>
-
   </div>
 
 </div>
@@ -579,13 +549,6 @@
     </button>
 
 
-    <button
-      class="secondary full"
-      id="saveToDriveBtn"
-    >
-      Save to Google Drive
-    </button>
-
 
     <button
       class="secondary full"
@@ -603,45 +566,6 @@
 
 const $ = id =>
   document.getElementById(id);
-
-const authError =
-  new URLSearchParams(window.location.search).get("auth_error");
-
-if (authError === "scope") {
-  alert(
-    "Google authorization was not completed. Please try Connect Google Drive again and approve the requested permissions."
-  );
-  window.history.replaceState({}, document.title, "/");
-}
-
-const driveConnectBtn =
-  document.getElementById("driveConnectBtn");
-const driveLogoutBtn =
-  document.getElementById("driveLogoutBtn");
-const heroDriveConnectBtn =
-  document.getElementById("heroDriveConnectBtn");
-
-if (driveConnectBtn) {
-  fetch("/api/auth/status", {
-    cache: "no-store"
-  })
-    .then(response => response.json())
-    .then(data => {
-      if (data.connected === true) {
-        driveConnectBtn.textContent =
-          "🟢 Google Drive Connected";
-
-        driveConnectBtn.href =
-          "/logout";
-        driveConnectBtn.classList.add("hidden");
-        driveLogoutBtn.classList.remove("hidden");
-        heroDriveConnectBtn.textContent =
-          "● Google Drive connected";
-        heroDriveConnectBtn.classList.add("connected");
-        heroDriveConnectBtn.href = "/logout";
-      }
-    });
-}
 
 let videos = [];
 
@@ -661,9 +585,6 @@ let compressQuality = "720p";
 
 let mediaType = "video";
 
-let saveToDriveAfterZip = false;
-
-
 const driveUrl =
   $("driveUrl");
 
@@ -675,41 +596,6 @@ const videoList =
 
 const downloadBar =
   $("downloadBar");
-
-async function updateDriveStatus() {
-  try {
-    const response = await fetch("/api/auth/status", {
-      cache: "no-store"
-    });
-
-    const data = await response.json();
-    const button = $("driveConnectBtn");
-
-    if (!button) return;
-
-    if (data.connected === true) {
-      button.textContent = "🟢 Google Drive Connected";
-      button.title = "Google Drive is connected";
-      button.classList.add("hidden");
-      driveLogoutBtn.classList.remove("hidden");
-      heroDriveConnectBtn.textContent =
-        "● Google Drive connected";
-      heroDriveConnectBtn.classList.add("connected");
-      heroDriveConnectBtn.href = "/logout";
-    } else {
-      button.classList.remove("hidden");
-      driveLogoutBtn.classList.add("hidden");
-      heroDriveConnectBtn.textContent =
-        "Connect Google Drive →";
-      heroDriveConnectBtn.classList.remove("connected");
-      heroDriveConnectBtn.href = "/login";
-    }
-  } catch (error) {
-    console.error("Drive status check failed:", error);
-  }
-}
-
-updateDriveStatus();
 
 /* -------------------------
    FILE SIZE
@@ -1951,13 +1837,6 @@ async function pollJob() {
           "hidden"
         );
 
-      if (saveToDriveAfterZip) {
-        saveToDriveAfterZip = false;
-        saveCompletedJobToDrive();
-        return;
-      }
-
-
       $("successModal")
         .classList.remove(
           "hidden"
@@ -2051,73 +1930,6 @@ $("successDownload").onclick =
 
     link.remove();
 
-  };
-
-
-/* -------------------------
-   SAVE TO GOOGLE DRIVE
-------------------------- */
-
-async function saveCompletedJobToDrive() {
-
-    const activeJobId = compressJobId || currentJob;
-    const activeJobType = compressJobId ? "compress" : "download";
-
-    if (!activeJobId) {
-      return;
-    }
-
-    const folderLink = window.prompt(
-      "Optional: paste a Google Drive folder link to save the file there. Leave blank to save to My Drive.",
-      ""
-    );
-
-    try {
-      const response = await fetch(
-        "/api/save-to-drive",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            job_id: activeJobId,
-            job_type: activeJobType,
-            folder_url: folderLink || ""
-          })
-        }
-      );
-
-      const data = await readJson(response);
-
-      if (!response.ok) {
-        throw new Error(data.error || "Could not save the output to Google Drive.");
-      }
-
-      if (data.link) {
-        window.open(data.link, "_blank", "noopener,noreferrer");
-      }
-
-      alert("Saved to Google Drive successfully.");
-    } catch (error) {
-      alert(error.message || "Could not save the output to Google Drive.");
-    }
-}
-
-
-$("saveToDriveBtn").onclick =
-  saveCompletedJobToDrive;
-
-
-$("saveSelectedToDriveBtn").onclick =
-  () => {
-    if (!selected.size) {
-      return;
-    }
-
-    saveToDriveAfterZip = true;
-    $("downloadModal").classList.add("hidden");
-    $("zipBtn").click();
   };
 
 

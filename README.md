@@ -34,26 +34,15 @@ Cloud Storage preserves generated ZIPs and compressed files when the instance
 restarts. A later Redis or database migration can remove the one-instance
 limit.
 
-`GOOGLE_API_KEY` is optional. If configured, users can scan and download files
-from folders shared as "Anyone with the link" without signing in. Private Drive
-folders, compression, and saving results back to Drive still require OAuth.
+`GOOGLE_API_KEY` is required. Users can scan and download files from folders
+shared as "Anyone with the link" without signing in. DriveBatch does not request
+Google OAuth access, access private Drive folders, or save results back to Drive.
 
-## Custom domain and OAuth
+## Custom domain
 
-After deployment, map the purchased domain in Cloud Run. Add the DNS records
-shown by Google, then set:
-
-```text
-OAUTH_REDIRECT_URI=https://your-domain.example/oauth2callback
-```
-
-In Google Cloud OAuth settings, add the domain to authorized domains and add
-the same callback URL to authorized redirect URIs. Set the consent screen
-homepage to `https://your-domain.example/`, privacy policy to
-`https://your-domain.example/privacy`, and terms URL to
-`https://your-domain.example/terms`.
+After deployment, map the purchased domain in Cloud Run and add the DNS records
+shown by Google. DriveBatch does not use Google OAuth.
 
 The privacy and terms pages are templates. Replace the generic wording with
 your legal name, contact email, business location, retention policy, and any
-analytics/cookie disclosures before public launch. Google OAuth verification
-may be required because DriveBatch requests write access to Google Drive.
+analytics/cookie disclosures before public launch.
