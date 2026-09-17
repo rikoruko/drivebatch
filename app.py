@@ -1066,13 +1066,6 @@ def compress_worker(
     set_compress_job(job_id, temp_dir=temp_dir)
 
     try:
-        service = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False,
-        )
-
         total = len(file_ids)
 
         set_compress_job(
