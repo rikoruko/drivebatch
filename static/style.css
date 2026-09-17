@@ -371,7 +371,38 @@ main{
   width:18px;
   height:18px;
   flex:none;
-  accent-color:#7c5cff;
+  appearance:none;
+  -webkit-appearance:none;
+  display:grid;
+  place-content:center;
+  border:1px solid #4f466f;
+  border-radius:5px;
+  background:transparent;
+  cursor:pointer;
+}
+
+.video-check::before{
+  content:"";
+  width:10px;
+  height:10px;
+  transform:scale(0);
+  transition:transform .12s ease-in-out;
+  clip-path:polygon(14% 44%,0 59%,38% 96%,100% 23%,86% 9%,38% 67%);
+  background:#b4a8ff;
+}
+
+.video-check:checked{
+  border-color:#8c75ff;
+  background:transparent;
+}
+
+.video-check:checked::before{
+  transform:scale(1);
+}
+
+.video-check:focus-visible{
+  outline:2px solid #8c75ff;
+  outline-offset:2px;
 }
 
 .preview-button{
