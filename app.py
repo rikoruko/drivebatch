@@ -55,6 +55,11 @@ IMAGE_MIMES = {
     "image/svg+xml",
 }
 
+AUDIO_MIMES = {
+    "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav",
+    "audio/ogg", "audio/flac", "audio/aac", "audio/mp4",
+}
+
 VIDEO_EXTENSIONS = {
     ".mp4", ".mov", ".avi", ".mkv", ".webm",
     ".mpeg", ".mpg", ".m4v", ".3gp", ".flv", ".wmv"
@@ -63,6 +68,10 @@ VIDEO_EXTENSIONS = {
 IMAGE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".gif",
     ".bmp", ".heic", ".heif", ".tif", ".tiff", ".svg"
+}
+
+AUDIO_EXTENSIONS = {
+    ".mp3", ".wav", ".ogg", ".oga", ".flac", ".aac", ".m4a", ".opus",
 }
 
 DOWNLOAD_JOBS = {}
@@ -166,6 +175,14 @@ def is_image(file):
     extension = os.path.splitext(name)[1]
 
     return extension in IMAGE_EXTENSIONS
+
+
+def is_audio(file):
+    mime = str(file.get("mimeType", "")).lower()
+    if mime in AUDIO_MIMES:
+        return True
+    name = str(file.get("name", "")).lower()
+    return os.path.splitext(name)[1] in AUDIO_EXTENSIONS
 
 
 def safe_name(name):
@@ -284,6 +301,17 @@ def scan_recursive(
                 "type": "image",
             })
 
+        elif media_type == "audio" and is_audio(item):
+
+            results.append({
+                "id": item_id,
+                "name": name,
+                "mimeType": mime,
+                "size": int(item.get("size") or 0),
+                "path": current_path,
+                "type": "audio",
+            })
+
     return results
 
 
@@ -328,9 +356,9 @@ def api_scan():
             data.get("media_type", "video")
         ).strip().lower()
 
-        if media_type not in {"video", "image"}:
+        if media_type not in {"video", "image", "audio"}:
             return jsonify({
-                "error": "media_type must be either video or image."
+                "error": "media_type must be video, image, or audio."
             }), 400
 
         if not url:
@@ -355,6 +383,7 @@ def api_scan():
             "success": True,
             "videos": items,
             "images": items if media_type == "image" else [],
+            "audio": items if media_type == "audio" else [],
             "count": len(items),
             "media_type": media_type,
         })
@@ -1490,6 +1519,9 @@ def stream_drive_file(file_id, as_attachment=False):
     for header in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]:
         if header in drive_res.headers:
             headers[header] = drive_res.headers[header]
+
+    if meta_data.get("mimeType"):
+        headers["Content-Type"] = meta_data["mimeType"]
 
     if "Accept-Ranges" not in headers:
         headers["Accept-Ranges"] = "bytes"

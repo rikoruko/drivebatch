@@ -67,6 +67,7 @@
   <div class="media-toggle" role="tablist" aria-label="Media type">
     <button class="media-toggle-btn active" data-media-type="video" type="button">Videos</button>
     <button class="media-toggle-btn" data-media-type="image" type="button">Images</button>
+    <button class="media-toggle-btn" data-media-type="audio" type="button">Music</button>
   </div>
 
   <div class="input-row">
@@ -290,6 +291,12 @@
       playsinline
     ></video>
 
+    <audio
+      id="previewAudio"
+      class="preview-audio hidden"
+      controls
+    ></audio>
+
     <img
       id="previewImage"
       class="preview-image hidden"
@@ -301,7 +308,7 @@
       class="primary full"
       id="previewDownload"
     >
-      Download Video
+      Download
     </button>
 
   </div>
@@ -735,7 +742,9 @@ function updateSelection() {
 
   });
 
-  const itemLabel = mediaType === "image" ? "image" : "video";
+  const itemLabel = mediaType === "image"
+    ? "image"
+    : mediaType === "audio" ? "track" : "video";
 
 
   $("selectedCount")
@@ -778,7 +787,9 @@ function renderVideos() {
       .includes(q)
     );
 
-  const itemLabel = mediaType === "image" ? "image" : "video";
+  const itemLabel = mediaType === "image"
+    ? "image"
+    : mediaType === "audio" ? "track" : "video";
 
 
   if (!filtered.length) {
@@ -962,7 +973,10 @@ async function scan() {
 
 
     videos =
-      data.videos || [];
+      data.videos ||
+      data.images ||
+      data.audio ||
+      [];
 
 
     selected.clear();
@@ -978,10 +992,14 @@ async function scan() {
         0
       );
 
-    const label = mediaType === "image" ? "images" : "videos";
+    const label = mediaType === "image"
+      ? "images"
+      : mediaType === "audio" ? "tracks" : "videos";
 
     $("resultsTitle").textContent =
-      mediaType === "image" ? "Your images" : "Your videos";
+      mediaType === "image"
+        ? "Your images"
+        : mediaType === "audio" ? "Your music" : "Your videos";
 
 
     $("folderStats")
@@ -1054,19 +1072,34 @@ function openPreview(id) {
     encodeURIComponent(id);
 
   const previewVideo = $("previewVideo");
+  const previewAudio = $("previewAudio");
   const previewImage = $("previewImage");
   const isImage = mediaType === "image";
+  const isAudio = mediaType === "audio";
 
-  previewVideo.classList.toggle("hidden", isImage);
+  previewVideo.classList.toggle("hidden", isImage || isAudio);
+  previewAudio.classList.toggle("hidden", !isAudio);
   previewImage.classList.toggle("hidden", !isImage);
 
   if (isImage) {
     previewVideo.pause();
     previewVideo.removeAttribute("src");
     previewVideo.load();
+    previewAudio.pause();
+    previewAudio.removeAttribute("src");
+    previewAudio.load();
     previewImage.src = previewUrl;
     previewImage.alt = video.name || "Image";
+  } else if (isAudio) {
+    previewVideo.pause();
+    previewVideo.removeAttribute("src");
+    previewVideo.load();
+    previewImage.removeAttribute("src");
+    previewAudio.src = previewUrl;
   } else {
+    previewAudio.pause();
+    previewAudio.removeAttribute("src");
+    previewAudio.load();
     previewImage.removeAttribute("src");
     previewVideo.src = previewUrl;
   }
@@ -1097,6 +1130,11 @@ function closePreview() {
   );
 
   player.load();
+
+  const audio = $("previewAudio");
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
 
   $("previewImage").removeAttribute("src");
 
@@ -1571,7 +1609,9 @@ $("closeDownload").onclick =
 
 
 function applyMediaType(nextType) {
-  mediaType = nextType === "image" ? "image" : "video";
+  mediaType = ["video", "image", "audio"].includes(nextType)
+    ? nextType
+    : "video";
 
   document.querySelectorAll(".media-toggle-btn").forEach(button => {
     const active = button.dataset.mediaType === mediaType;
@@ -1583,6 +1623,7 @@ function applyMediaType(nextType) {
   selected.clear();
   results.classList.add("hidden");
   downloadBar.classList.add("hidden");
+  $("batchStreamSaver").classList.toggle("hidden", mediaType !== "video");
 }
 
 

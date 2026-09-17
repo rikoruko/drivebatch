@@ -419,24 +419,23 @@ main{
 }
 
 .preview-button{
-  width:46px;
-  height:46px;
+  width:42px;
+  height:42px;
   flex:none;
   display:grid;
   place-items:center;
-  border:1px solid #6654bd;
-  border-radius:50%;
-  background:linear-gradient(145deg,#30245f,#17152d);
+  border:1px solid #292e39;
+  border-radius:11px;
+  background:#151821;
   color:#fff;
   font-size:15px;
   padding-left:2px;
-  box-shadow:0 5px 16px #0005;
   cursor:pointer;
 }
 
 .preview-button:hover{
-  border-color:#a08cff;
-  background:linear-gradient(145deg,#4d3d8d,#211b43);
+  border-color:#7c5cff;
+  background:#1a1d28;
 }
 
 .preview-button:focus-visible{
@@ -612,9 +611,17 @@ main{
   margin:15px 0;
 }
 
-.preview-image{
+.preview-audio{
   display:block;
   width:100%;
+  margin:22px 0;
+}
+
+.preview-image{
+  display:block;
+  width:auto;
+  max-width:100%;
+  height:auto;
   max-height:55vh;
   object-fit:contain;
   background:#000;
