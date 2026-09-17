@@ -1468,9 +1468,9 @@ def start_compress():
     try:
         credentials = credentials_copy()
 
-        if not credentials:
+        if not credentials and not GOOGLE_API_KEY:
             return jsonify({
-                "error": "Please connect Google Drive first."
+                "error": "Please connect Google Drive, or use a public folder with public access configured."
             }), 401
 
         data = request.get_json(
