@@ -124,6 +124,18 @@ main{
   filter:brightness(1.1);
 }
 
+.hero-connect.connected{
+  background:transparent;
+  border:1px solid #2d8a61;
+  color:#63d89b;
+  cursor:pointer;
+}
+
+.hero-connect.connected:hover{
+  background:#123022;
+  filter:none;
+}
+
 .card,.scanner{
   background:#10131b;
   border:1px solid #1c202b;
