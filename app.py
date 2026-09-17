@@ -26,6 +26,7 @@ from google.auth.transport.requests import AuthorizedSession
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from google.cloud import storage
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
@@ -47,7 +48,10 @@ def download_drive_file(service, file_id, destination_path):
 
     return destination_path
             
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# Saving generated files to a user-selected Drive folder requires write access.
+# Existing read-only sessions must sign in again after this scope changes.
+SCOPES = ["https://www.googleapis.com/auth/drive"]
+OAUTH_SCOPE_VERSION = 2
 
 VIDEO_MIMES = {
     "video/mp4",
@@ -88,6 +92,40 @@ DOWNLOAD_LOCK = threading.Lock()
 
 COMPRESS_JOBS = {}
 COMPRESS_LOCK = threading.Lock()
+GCS_BUCKET = os.environ.get("GCS_BUCKET", "").strip()
+
+
+def artifact_bucket():
+    if not GCS_BUCKET:
+        return None
+    return storage.Client().bucket(GCS_BUCKET)
+
+
+def store_artifact(job_id, path, filename):
+    bucket = artifact_bucket()
+    if not bucket:
+        return None
+    object_name = f"jobs/{job_id}/{safe_name(filename)}"
+    bucket.blob(object_name).upload_from_filename(path)
+    return object_name
+
+
+def materialize_artifact(job, key, suffix):
+    path = job.get(key)
+    if path and os.path.exists(path):
+        return path, False
+    object_name = job.get(f"{key}_object")
+    bucket = artifact_bucket()
+    if not object_name or not bucket:
+        return None, False
+    temporary = tempfile.NamedTemporaryFile(
+        prefix="drivebatch_artifact_",
+        suffix=suffix,
+        delete=False,
+    )
+    temporary.close()
+    bucket.blob(object_name).download_to_filename(temporary.name)
+    return temporary.name, True
 
 
 def client_config():
@@ -127,6 +165,9 @@ def credentials_from_session():
     if not data:
         return None
 
+    if data.get("scope_version") != OAUTH_SCOPE_VERSION:
+        return None
+
     try:
         return Credentials(
             token=data["token"],
@@ -147,6 +188,9 @@ def credentials_copy():
     data = session.get("google_token")
 
     if not data:
+        return None
+
+    if data.get("scope_version") != OAUTH_SCOPE_VERSION:
         return None
 
     return Credentials(
@@ -349,6 +393,16 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
+
+
 @app.route("/login")
 def login():
     flow = make_flow()
@@ -388,6 +442,7 @@ def oauth_callback():
             "client_id": credentials.client_id,
             "client_secret": credentials.client_secret,
             "scopes": credentials.scopes,
+            "scope_version": OAUTH_SCOPE_VERSION,
         }
 
         session.pop(
@@ -946,6 +1001,9 @@ def zip_worker(
             completed=total,
             message="ZIP ready!",
             zip_path=zip_path,
+            zip_path_object=store_artifact(
+                job_id, zip_path, "DriveBatch.zip"
+            ),
         )
 
     except Exception as exc:
@@ -1059,6 +1117,9 @@ def compress_worker(
                 completed=total,
                 message="Compression ready!",
                 zip_path=zip_path,
+                zip_path_object=store_artifact(
+                    job_id, zip_path, "StreamSaver.zip"
+                ),
                 temp_dir=temp_dir,
             )
         else:
@@ -1069,6 +1130,15 @@ def compress_worker(
                 completed=total,
                 message="Compression ready!",
                 file_path=output_files[0] if output_files else None,
+                file_path_object=(
+                    store_artifact(
+                        job_id,
+                        output_files[0],
+                        os.path.basename(output_files[0]),
+                    )
+                    if output_files
+                    else None
+                ),
                 temp_dir=temp_dir,
             )
 
@@ -1207,20 +1277,26 @@ def download_zip(job_id):
             "error": "ZIP is not ready yet."
         }), 409
 
-    path = job.get("zip_path")
+    path, temporary = materialize_artifact(job, "zip_path", ".zip")
 
-    if not path or not os.path.exists(path):
+    if not path:
         return jsonify({
             "error": "ZIP file is no longer available."
         }), 404
-
-    return send_file(
-        path,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name="DriveBatch.zip",
-        max_age=0,
-    )
+    try:
+        return send_file(
+            path,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name="DriveBatch.zip",
+            max_age=0,
+        )
+    finally:
+        if temporary:
+            threading.Timer(
+                60,
+                lambda: os.path.exists(path) and os.remove(path),
+            ).start()
 
 
 @app.route("/api/save-to-drive", methods=["POST"])
@@ -1259,8 +1335,15 @@ def save_to_drive():
                 "error": "Job not found."
             }), 404
 
-        target_path = job.get("zip_path") or job.get("file_path")
-        if not target_path or not os.path.exists(target_path):
+        target_key = "zip_path" if (
+            job.get("zip_path") or job.get("zip_path_object")
+        ) else "file_path"
+        target_path, temporary = materialize_artifact(
+            job,
+            target_key,
+            ".zip" if target_key == "zip_path" else ".mp4",
+        )
+        if not target_path:
             return jsonify({
                 "error": "The output file is not available to save."
             }), 409
@@ -1297,12 +1380,18 @@ def save_to_drive():
             fields="id,name,webViewLink",
         ).execute()
 
-        return jsonify({
+        response = {
             "success": True,
             "file_id": result.get("id"),
             "name": result.get("name"),
             "link": result.get("webViewLink"),
-        })
+        }
+        if temporary:
+            try:
+                os.remove(target_path)
+            except OSError:
+                pass
+        return jsonify(response)
 
     except Exception as exc:
         return jsonify({
@@ -1595,23 +1684,39 @@ def compress_file(job_id):
             "error": "Compression not ready yet."
         }), 409
 
-    zip_path = job.get("zip_path")
-    file_path = job.get("file_path")
+    zip_path, zip_temporary = materialize_artifact(
+        job, "zip_path", ".zip"
+    )
+    file_path, file_temporary = materialize_artifact(
+        job, "file_path", ".mp4"
+    )
 
-    if zip_path and os.path.exists(zip_path):
-        return send_file(
+    if zip_path:
+        response = send_file(
             zip_path,
             mimetype="application/zip",
             as_attachment=True,
             download_name="StreamSaver.zip",
             max_age=0,
         )
-    elif file_path and os.path.exists(file_path):
-        return stream_local_file(
+        if zip_temporary:
+            threading.Timer(
+                60,
+                lambda: os.path.exists(zip_path) and os.remove(zip_path),
+            ).start()
+        return response
+    elif file_path:
+        response = stream_local_file(
             file_path,
             os.path.basename(file_path),
             "video/mp4",
         )
+        if file_temporary:
+            threading.Timer(
+                60,
+                lambda: os.path.exists(file_path) and os.remove(file_path),
+            ).start()
+        return response
     else:
         return jsonify({
             "error": "File no longer available."

@@ -227,6 +227,12 @@
 
 </section>
 
+<footer class="site-footer">
+  <a href="/privacy">Privacy Policy</a>
+  <a href="/terms">Terms of Service</a>
+</footer>
+
+
 </main>
 
 
@@ -326,6 +332,18 @@
     >
       ↓ Download individually
     </button>
+
+    <button
+      class="secondary full"
+      id="saveSelectedToDriveBtn"
+    >
+      ☁ Save ZIP to Google Drive
+    </button>
+
+    <p class="modal-note">
+      Saving to Drive requires Google authorization. The selected files are
+      packaged as a ZIP before upload.
+    </p>
 
   </div>
 
@@ -582,6 +600,8 @@ let compressIsBatch = false;
 let compressQuality = "720p";
 
 let mediaType = "video";
+
+let saveToDriveAfterZip = false;
 
 
 const driveUrl =
@@ -1857,6 +1877,12 @@ async function pollJob() {
           "hidden"
         );
 
+      if (saveToDriveAfterZip) {
+        saveToDriveAfterZip = false;
+        saveCompletedJobToDrive();
+        return;
+      }
+
 
       $("successModal")
         .classList.remove(
@@ -1958,8 +1984,7 @@ $("successDownload").onclick =
    SAVE TO GOOGLE DRIVE
 ------------------------- */
 
-$("saveToDriveBtn").onclick =
-  async () => {
+async function saveCompletedJobToDrive() {
 
     const activeJobId = compressJobId || currentJob;
     const activeJobType = compressJobId ? "compress" : "download";
@@ -2003,6 +2028,22 @@ $("saveToDriveBtn").onclick =
     } catch (error) {
       alert(error.message || "Could not save the output to Google Drive.");
     }
+}
+
+
+$("saveToDriveBtn").onclick =
+  saveCompletedJobToDrive;
+
+
+$("saveSelectedToDriveBtn").onclick =
+  () => {
+    if (!selected.size) {
+      return;
+    }
+
+    saveToDriveAfterZip = true;
+    $("downloadModal").classList.add("hidden");
+    $("zipBtn").click();
   };
 
 
