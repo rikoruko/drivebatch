@@ -209,6 +209,28 @@ main{
   margin-top:12px;
 }
 
+.media-toggle{
+  display:flex;
+  gap:8px;
+  margin-bottom:16px;
+}
+
+.media-toggle-btn{
+  flex:1;
+  background:#0d1118;
+  color:#dfe3ef;
+  border:1px solid #2a303d;
+  border-radius:12px;
+  padding:10px 12px;
+  font-weight:700;
+}
+
+.media-toggle-btn.active{
+  background:#7c5cff;
+  border-color:#7c5cff;
+  color:#fff;
+}
+
 .results{
   margin:55px 0;
 }
@@ -459,6 +481,16 @@ main{
   display:block;
   width:100%;
   max-height:55vh;
+  background:#000;
+  border-radius:14px;
+  margin:15px 0;
+}
+
+.preview-image{
+  display:block;
+  width:100%;
+  max-height:55vh;
+  object-fit:contain;
   background:#000;
   border-radius:14px;
   margin:15px 0;

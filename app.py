@@ -25,11 +25,14 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import AuthorizedSession
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.secret_key = os.environ.get("SECRET_KEY", "drivebatch-secret")
+app.config["JSON_SORT_KEYS"] = False
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
+app.config["PREFERRED_URL_SCHEME"] = "https" if os.environ.get("FLASK_ENV") == "production" else "http"
 
 def download_drive_file(service, file_id, destination_path):
     request = service.files().get_media(fileId=file_id)
@@ -58,9 +61,26 @@ VIDEO_MIMES = {
     "video/x-flv",
 }
 
+IMAGE_MIMES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+    "image/heic",
+    "image/heif",
+    "image/tiff",
+    "image/svg+xml",
+}
+
 VIDEO_EXTENSIONS = {
     ".mp4", ".mov", ".avi", ".mkv", ".webm",
     ".mpeg", ".mpg", ".m4v", ".3gp", ".flv", ".wmv"
+}
+
+IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif",
+    ".bmp", ".heic", ".heif", ".tif", ".tiff", ".svg"
 }
 
 DOWNLOAD_JOBS = {}
@@ -188,6 +208,23 @@ def is_video(file):
     return extension in VIDEO_EXTENSIONS
 
 
+def is_image(file):
+    mime = str(
+        file.get("mimeType", "")
+    ).lower()
+
+    if mime in IMAGE_MIMES:
+        return True
+
+    name = str(
+        file.get("name", "")
+    ).lower()
+
+    extension = os.path.splitext(name)[1]
+
+    return extension in IMAGE_EXTENSIONS
+
+
 def safe_name(name):
     name = str(name or "video")
     name = name.replace("\x00", "")
@@ -236,6 +273,7 @@ def scan_recursive(
     folder_id,
     path="",
     visited=None,
+    media_type="video",
 ):
     if visited is None:
         visited = set()
@@ -277,10 +315,11 @@ def scan_recursive(
                     item_id,
                     current_path,
                     visited,
+                    media_type,
                 )
             )
 
-        elif is_video(item):
+        elif media_type == "video" and is_video(item):
 
             results.append({
                 "id": item_id,
@@ -288,6 +327,18 @@ def scan_recursive(
                 "mimeType": mime,
                 "size": int(item.get("size") or 0),
                 "path": current_path,
+                "type": "video",
+            })
+
+        elif media_type == "image" and is_image(item):
+
+            results.append({
+                "id": item_id,
+                "name": name,
+                "mimeType": mime,
+                "size": int(item.get("size") or 0),
+                "path": current_path,
+                "type": "image",
             })
 
     return results
@@ -387,6 +438,14 @@ def api_scan():
         url = str(
             data.get("url", "")
         ).strip()
+        media_type = str(
+            data.get("media_type", "video")
+        ).strip().lower()
+
+        if media_type not in {"video", "image"}:
+            return jsonify({
+                "error": "media_type must be either video or image."
+            }), 400
 
         if not url:
             return jsonify({
@@ -400,15 +459,18 @@ def api_scan():
                 "error": "Could not find the Drive folder ID."
             }), 400
 
-        videos = scan_recursive(
+        items = scan_recursive(
             service,
             folder_id,
+            media_type=media_type,
         )
 
         return jsonify({
             "success": True,
-            "videos": videos,
-            "count": len(videos),
+            "videos": items,
+            "images": items if media_type == "image" else [],
+            "count": len(items),
+            "media_type": media_type,
         })
 
     except Exception as exc:
@@ -753,6 +815,12 @@ def zip_worker(
     set_job(job_id, temp_dir=temp_dir)
 
     try:
+        service = build(
+            "drive",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
         total = len(file_ids)
 
         set_job(
@@ -856,7 +924,7 @@ def zip_worker(
                         completed=index,
                         progress=progress,
                         message=(
-                            f"{index} / {total} videos"
+                            f"{index} / {total} files"
                         ),
                     )
 
@@ -866,7 +934,7 @@ def zip_worker(
                         status="error",
                         error=(
                             f"Could not download "
-                            f"video {index}: {exc}"
+                            f"file {index}: {exc}"
                         ),
                     )
                     return
@@ -1059,7 +1127,7 @@ def start_download():
         with DOWNLOAD_LOCK:
             DOWNLOAD_JOBS[job_id] = {
                 "status": "queued",
-                "quality": quality,
+                "quality": "original",
                 "total": len(file_ids),
                 "completed": 0,
                 "progress": 0,
@@ -1153,6 +1221,93 @@ def download_zip(job_id):
         download_name="DriveBatch.zip",
         max_age=0,
     )
+
+
+@app.route("/api/save-to-drive", methods=["POST"])
+def save_to_drive():
+    try:
+        credentials = credentials_copy()
+
+        if not credentials:
+            return jsonify({
+                "error": "Please connect Google Drive first."
+            }), 401
+
+        data = request.get_json(silent=True) or {}
+
+        job_id = str(data.get("job_id", "")).strip()
+        job_type = str(data.get("job_type", "download")).strip().lower()
+        folder_url = str(data.get("folder_url", "")).strip()
+        custom_name = str(data.get("filename", "")).strip() or None
+
+        if not job_id:
+            return jsonify({
+                "error": "A job id is required."
+            }), 400
+
+        if job_type == "download":
+            job = get_job(job_id)
+        elif job_type == "compress":
+            job = get_compress_job(job_id)
+        else:
+            return jsonify({
+                "error": "job_type must be download or compress."
+            }), 400
+
+        if not job:
+            return jsonify({
+                "error": "Job not found."
+            }), 404
+
+        target_path = job.get("zip_path") or job.get("file_path")
+        if not target_path or not os.path.exists(target_path):
+            return jsonify({
+                "error": "The output file is not available to save."
+            }), 409
+
+        folder_id = None
+        if folder_url:
+            folder_id = extract_folder_id(folder_url)
+            if not folder_id:
+                return jsonify({
+                    "error": "Could not find a valid Google Drive folder in that link."
+                }), 400
+
+        service = build(
+            "drive",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
+
+        filename = custom_name or os.path.basename(target_path)
+        metadata = {"name": filename}
+        if folder_id:
+            metadata["parents"] = [folder_id]
+
+        media = MediaFileUpload(
+            target_path,
+            resumable=True,
+            mimetype="application/zip" if filename.lower().endswith(".zip") else "application/octet-stream",
+        )
+
+        result = service.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id,name,webViewLink",
+        ).execute()
+
+        return jsonify({
+            "success": True,
+            "file_id": result.get("id"),
+            "name": result.get("name"),
+            "link": result.get("webViewLink"),
+        })
+
+    except Exception as exc:
+        return jsonify({
+            "error": str(exc)
+        }), 500
 
 
 @app.route(
@@ -1543,6 +1698,11 @@ def preview_video(file_id):
         return jsonify({
             "error": str(exc)
         }), 500
+
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"ok": True})
 
 
 @app.errorhandler(404)
