@@ -25,13 +25,26 @@ header{
 }
 
 .logo{
+  display:flex;
+  align-items:center;
+  gap:9px;
   color:#fff;
   text-decoration:none;
   font-size:22px;
   font-weight:800;
 }
 
-.logo span{color:#7c5cff}
+.logo-mark{
+  width:30px;
+  height:30px;
+  border-radius:8px;
+}
+
+.logo-word{
+  color:#fff;
+}
+
+.logo-word span{color:#7c5cff}
 
 .header-actions{
   display:flex;
