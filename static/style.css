@@ -221,6 +221,59 @@ main{
   margin-top:12px;
 }
 
+.support-card{
+  display:flex;
+  align-items:center;
+  gap:13px;
+  margin-top:20px;
+  padding:13px 15px;
+  color:#fff;
+  text-decoration:none;
+  background:linear-gradient(110deg,#211a3e,#181526);
+  border:1px solid #493d79;
+  border-radius:15px;
+  transition:transform .15s,border-color .15s,background .15s;
+}
+
+.support-card:hover{
+  transform:translateY(-2px);
+  border-color:#9c8eff;
+  background:linear-gradient(110deg,#2a2050,#1c1930);
+}
+
+.support-card img{
+  width:46px;
+  height:46px;
+  flex:none;
+  object-fit:cover;
+  border-radius:50%;
+  border:2px solid #a99aff;
+}
+
+.support-card span{
+  flex:1;
+  min-width:0;
+}
+
+.support-card strong,
+.support-card small{
+  display:block;
+}
+
+.support-card strong{
+  font-size:14px;
+}
+
+.support-card small{
+  margin-top:3px;
+  color:#b7afdc;
+  font-size:12px;
+}
+
+.support-card b{
+  font-size:24px;
+}
+
 .media-toggle{
   display:flex;
   gap:8px;
