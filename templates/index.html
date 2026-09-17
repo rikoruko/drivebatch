@@ -53,7 +53,7 @@
     and download one or many at once.
   </p>
 
-  <a class="hero-connect" href="/login">
+  <a class="hero-connect" id="heroDriveConnectBtn" href="/login">
     Connect Google Drive →
   </a>
 </section>
@@ -587,6 +587,8 @@ const driveConnectBtn =
   document.getElementById("driveConnectBtn");
 const driveLogoutBtn =
   document.getElementById("driveLogoutBtn");
+const heroDriveConnectBtn =
+  document.getElementById("heroDriveConnectBtn");
 
 if (driveConnectBtn) {
   fetch("/api/auth/status", {
@@ -602,6 +604,10 @@ if (driveConnectBtn) {
           "/logout";
         driveConnectBtn.classList.add("hidden");
         driveLogoutBtn.classList.remove("hidden");
+        heroDriveConnectBtn.textContent =
+          "● Google Drive connected";
+        heroDriveConnectBtn.classList.add("connected");
+        heroDriveConnectBtn.href = "/logout";
       }
     });
 }
@@ -655,9 +661,17 @@ async function updateDriveStatus() {
       button.title = "Google Drive is connected";
       button.classList.add("hidden");
       driveLogoutBtn.classList.remove("hidden");
+      heroDriveConnectBtn.textContent =
+        "● Google Drive connected";
+      heroDriveConnectBtn.classList.add("connected");
+      heroDriveConnectBtn.href = "/logout";
     } else {
       button.classList.remove("hidden");
       driveLogoutBtn.classList.add("hidden");
+      heroDriveConnectBtn.textContent =
+        "Connect Google Drive →";
+      heroDriveConnectBtn.classList.remove("connected");
+      heroDriveConnectBtn.href = "/login";
     }
   } catch (error) {
     console.error("Drive status check failed:", error);
