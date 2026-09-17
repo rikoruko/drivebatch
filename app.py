@@ -1085,7 +1085,7 @@ def compress_worker(
         )
 
         output_files = [None] * total
-        workers = min(3, total)
+        workers = 1
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(
@@ -1226,9 +1226,9 @@ def start_download():
                 "error": "No videos were selected."
             }), 400
 
-        if len(file_ids) > 500:
+        if len(file_ids) > 100:
             return jsonify({
-                "error": "You can download up to 500 videos at once."
+                "error": "You can download up to 100 videos at once."
             }), 400
 
         job_id = uuid.uuid4().hex
@@ -1507,9 +1507,9 @@ def start_compress():
                 "error": "No videos were selected."
             }), 400
 
-        if len(file_ids) > 500:
+        if len(file_ids) > 100:
             return jsonify({
-                "error": "You can compress up to 500 videos at once."
+                "error": "You can compress up to 100 videos at once."
             }), 400
 
         job_id = uuid.uuid4().hex

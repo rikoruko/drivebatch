@@ -23,6 +23,11 @@ spec:
               value: production
             - name: GCS_BUCKET
               value: REPLACE_WITH_BUCKET_NAME
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: google-api-key
+                  key: latest
             - name: GOOGLE_CLIENT_SECRET_JSON
               valueFrom:
                 secretKeyRef:
