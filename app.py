@@ -47,7 +47,10 @@ def download_drive_file(service, file_id, destination_path):
 
     return destination_path
             
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# Saving generated files to a user-selected Drive folder requires write access.
+# Existing read-only sessions must sign in again after this scope changes.
+SCOPES = ["https://www.googleapis.com/auth/drive"]
+OAUTH_SCOPE_VERSION = 2
 
 VIDEO_MIMES = {
     "video/mp4",
@@ -127,6 +130,9 @@ def credentials_from_session():
     if not data:
         return None
 
+    if data.get("scope_version") != OAUTH_SCOPE_VERSION:
+        return None
+
     try:
         return Credentials(
             token=data["token"],
@@ -147,6 +153,9 @@ def credentials_copy():
     data = session.get("google_token")
 
     if not data:
+        return None
+
+    if data.get("scope_version") != OAUTH_SCOPE_VERSION:
         return None
 
     return Credentials(
@@ -388,6 +397,7 @@ def oauth_callback():
             "client_id": credentials.client_id,
             "client_secret": credentials.client_secret,
             "scopes": credentials.scopes,
+            "scope_version": OAUTH_SCOPE_VERSION,
         }
 
         session.pop(
