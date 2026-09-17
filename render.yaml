@@ -10,10 +10,6 @@ services:
     envVars:
       - key: SECRET_KEY
         generateValue: true
-      - key: GOOGLE_CLIENT_SECRET_JSON
-        sync: false
-      - key: OAUTH_REDIRECT_URI
-        sync: false
       - key: CLOUDCONVERT_API_KEY
         sync: false
       - key: GOOGLE_API_KEY
