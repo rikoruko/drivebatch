@@ -424,12 +424,14 @@ def download_drive_file(
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
     if not GOOGLE_API_KEY:
         raise RuntimeError("Public Google Drive access is not configured.")
-    response = requests.get(
+        response = requests.get(
         url,
         params={"key": GOOGLE_API_KEY},
         stream=True,
         timeout=600,
+        headers={"Range": "bytes=0-"},
     )
+
 
     with response:
         if response.status_code != 200:
