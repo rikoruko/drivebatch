@@ -691,7 +691,7 @@ def compress_one_video(
         temp_dir,
         f"input_{file_index}_{filename}",
     )
-        output_path = os.path.join(
+    output_path = os.path.join(
         temp_dir,
         f"output_{file_index}_{filename}",
     )
