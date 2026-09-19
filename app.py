@@ -417,18 +417,19 @@ def get_compress_job(job_id):
 
 
 def download_drive_file(credentials, file_id, output_path):
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    # Try the direct 'uc' download URL with confirm=t to bypass virus scan warnings
+    url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+    
     response = requests.get(
         url,
         stream=True,
         timeout=60,
         allow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     )
 
     if "text/html" in response.headers.get("Content-Type", ""):
-        raise RuntimeError("Google Drive blocked this download (likely needs a virus scan).")
-
-    if response.status_code != 200:
+        # Fallback to API if the direct link still returns HTML (e.g. still blocked)
         if not GOOGLE_API_KEY:
             raise RuntimeError("Public Google Drive access is not configured.")
         url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
