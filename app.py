@@ -695,11 +695,15 @@ def compress_one_video(
         temp_dir,
         f"output_{file_index}_{filename}",
     )
-    set_compress_job(
+        set_compress_job(
         job_id,
         message=f"Video {file_index} / {total_files}: downloading {filename}...",
     )
     download_drive_file(credentials, file_id, input_path)
+
+    if os.path.getsize(input_path) < 1024 * 10:
+        raise RuntimeError(f"Download failed: received invalid file content for {filename}")
+
     set_compress_job(
         job_id,
         message=f"Video {file_index} / {total_files}: starting conversion...",
