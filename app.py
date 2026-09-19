@@ -425,6 +425,9 @@ def download_drive_file(credentials, file_id, output_path):
         allow_redirects=True,
     )
 
+    if "text/html" in response.headers.get("Content-Type", ""):
+        raise RuntimeError("Google Drive blocked this download (likely needs a virus scan).")
+
     if response.status_code != 200:
         if not GOOGLE_API_KEY:
             raise RuntimeError("Public Google Drive access is not configured.")
