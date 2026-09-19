@@ -417,7 +417,7 @@ def get_compress_job(job_id):
 
 
 def download_drive_file(credentials, file_id, output_path):
-    if not GOOGLE_API_KEY:
+        if not GOOGLE_API_KEY:
         raise RuntimeError("Public Google Drive access is not configured.")
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
     response = requests.get(
@@ -427,7 +427,7 @@ def download_drive_file(credentials, file_id, output_path):
         timeout=60,
         headers={"Range": "bytes=0-"},
     )
-        with response:
+    with response:
         if response.status_code not in (200, 206):
             raise RuntimeError(
                 f"HTTP {response.status_code} while downloading file {file_id}"
