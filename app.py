@@ -427,8 +427,8 @@ def download_drive_file(credentials, file_id, output_path):
         timeout=60,
         headers={"Range": "bytes=0-"},
     )
-    with response:
-        if response.status_code != 200:
+        with response:
+        if response.status_code not in (200, 206):
             raise RuntimeError(
                 f"HTTP {response.status_code} while downloading file {file_id}"
             )
