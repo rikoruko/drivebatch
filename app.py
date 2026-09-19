@@ -417,25 +417,34 @@ def get_compress_job(job_id):
 
 
 def download_drive_file(credentials, file_id, output_path):
-    if not GOOGLE_API_KEY:
-        raise RuntimeError("Public Google Drive access is not configured.")
-    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
     response = requests.get(
         url,
-        params={"key": GOOGLE_API_KEY},
         stream=True,
         timeout=60,
-        headers={"Range": "bytes=0-"},
+        allow_redirects=True,
     )
-    with response:
+
+    if response.status_code != 200:
+        if not GOOGLE_API_KEY:
+            raise RuntimeError("Public Google Drive access is not configured.")
+        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        response = requests.get(
+            url,
+            params={"key": GOOGLE_API_KEY},
+            stream=True,
+            timeout=60,
+            headers={"Range": "bytes=0-"},
+        )
         if response.status_code not in (200, 206):
             raise RuntimeError(
                 f"HTTP {response.status_code} while downloading file {file_id}"
             )
-        with open(output_path, "wb") as output:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    output.write(chunk)
+
+    with open(output_path, "wb") as output:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                output.write(chunk)
 
 
 def compress_video(
