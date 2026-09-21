@@ -2306,8 +2306,22 @@ $("compressProgressModal")
     }
   );
 
+
+async function updateDriveStatus() {
+  try {
+    const res = await fetch("/api/auth/status");
+    const data = await readJson(res);
+    if (data.connected) {
+      document.querySelector(".hero-connect").classList.add("hidden");
+    }
+  } catch (e) {
+    console.error("Failed to fetch auth status", e);
+  }
+}
+
 updateDriveStatus();
 </script>
+
 
 </body>
 </html>
