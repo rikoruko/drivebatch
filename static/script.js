@@ -1,103 +1,139 @@
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { toBlobURL } from '@ffmpeg/util';
+// Extract references cleanly from global CDN declarations to support simple native serving structures
+const { FFmpeg } = window.FFmpeg || {};
+const { toBlobURL } = window.FFmpegUtil || {};
 
 const ffmpeg = new FFmpeg();
-const MAX_MEM_BYTES = 1073741824; // 1GB
-window.currentScanItems = [];
+const MAX_MEM_BYTES = 1073741824; // 1GB Memory Ceiling Cap
+window.currentScanItems = []; // Populated by your main page after a successful scan
 
 async function initFFmpeg() {
     if (!ffmpeg.loaded) {
         await ffmpeg.load({
-            coreURL: await toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js', 'text/javascript'),
-            wasmURL: await toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm', 'application/wasm'),
+            coreURL: 'https://unpkg.com',
+            wasmURL: 'https://unpkg.com'
         });
     }
 }
 
 function updateUI(msg, pct) {
     const statusEl = document.getElementById('status');
-    const bar = document.getElementById('progress-bar');
     if (statusEl) statusEl.innerText = `Status: ${msg}`;
-    if (bar) {
-        bar.style.width = `${pct}%`;
-        bar.innerText = `${pct}%`;
+    
+    const b = document.getElementById('progress-bar');
+    if (b) {
+        b.style.width = `${pct}%`; 
+        b.innerText = `${Math.round(pct)}%`;
     }
 }
 
-async function compressVideo(item) {
-    if (item.size > MAX_MEM_BYTES) {
-        alert("File too large to compress in-browser. Please download the raw file directly.");
+// --- FEATURE 1: BROWSWER-BASED ZIP ASSEMBLY (0 SERVER EGRESS) ---
+async function downloadZip(items) {
+    if (!items || items.length === 0) {
+        alert("Please paste a valid folder link and scan for assets first.");
         return;
     }
+    updateUI("Initializing browser-side memory archive packager...", 5);
+    
+    const zip = new JSZip();
+    let processedCount = 0;
 
+    for (const item of items) {
+        processedCount++;
+        updateUI(`Fetching asset into archive ${processedCount}/${items.length}: ${item.name}`, (processedCount / items.length) * 80);
+        
+        try {
+            const res = await fetch(item.direct_url);
+            const dataBlob = await res.blob();
+            zip.file(item.name, dataBlob);
+        } catch (e) {
+            console.error(`Skipped compilation for asset: ${item.name}`, e);
+        }
+        await new Promise(r => setTimeout(r, 1000));
+    }
+    
+    updateUI("Assembling ZIP archive inside browser context...", 90);
+    const blob = await zip.generateAsync({type: "blob"});
+    
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "DriveBatch_Archive.zip";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    updateUI("ZIP Download completed!", 100);
+}
+
+// --- FEATURE 2: NATIVE STAGGERED INDIVIDUAL FLOWS ---
+async function downloadBatch(items) {
+    if (!items || items.length === 0) {
+        alert("Please paste a valid folder link and scan for assets first.");
+        return;
+    }
+    updateUI("Starting staggered individual downloads...", 10);
+    let count = 0;
+    
+    for (const item of items) {
+        count++;
+        const a = document.createElement('a');
+        a.href = item.direct_url; a.download = item.name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        
+        const progress = (count / items.length) * 100;
+        updateUI(`Triggered download ${count} of ${items.length}: ${item.name}`, progress);
+        
+        // Critical 2-second stagger prevents browser multi-file security blocks from popping up
+        await new Promise(r => setTimeout(r, 2000));
+    }
+    updateUI("All downloads triggered natively!", 100);
+}
+
+// --- FEATURE 3: LOCAL HARDWARE COMPRESSION (OPTIONAL HOOK) ---
+async function compressVideo(item) {
+    if (item.size > MAX_MEM_BYTES) {
+        alert("File too large to compress in-browser. Please download directly.");
+        return;
+    }
     await initFFmpeg();
-    updateUI("Buffering video stream...", 10);
-
     const resp = await fetch(item.direct_url);
     const reader = resp.body.getReader();
     const buf = new Uint8Array(item.size);
     let off = 0, lastU = 0;
-    const updateInterval = 5 * 1024 * 1024; // 5MB
-
+    
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buf.set(value, off);
         off += value.length;
-
-        if (off - lastU >= updateInterval || off === item.size) {
+        if (off - lastU >= 5*1024*1024 || off === item.size) {
             lastU = off;
-            const percent = Math.round((off / item.size) * 30);
-            updateUI(`Buffering: ${Math.round(off/1e6)}MB...`, 10 + percent);
+            updateUI(`Buffering... ${Math.round(off/1e6)}MB`, 10 + Math.round(off/item.size*30));
             await new Promise(r => setTimeout(r, 0));
         }
     }
-
     await ffmpeg.writeFile(item.name, buf);
-    updateUI("Compressing via local WebAssembly...", 50);
-
-    await ffmpeg.exec(['-i', item.name, '-vf', 'scale=-2:720', '-c:v', 'libx264', '-crf', '26', 'out.mp4']);
+    updateUI("Processing file via local WebAssembly compression...", 50);
     
+    await ffmpeg.exec(['-i', item.name, '-vf', 'scale=-2:720', '-c:v', 'libx264', 'out.mp4']);
     const data = await ffmpeg.readFile('out.mp4');
     const url = URL.createObjectURL(new Blob([data.buffer]));
     const a = document.createElement('a');
     a.href = url; a.download = `compressed_${item.name}`; a.click();
-    
     URL.revokeObjectURL(url);
     await ffmpeg.deleteFile(item.name); await ffmpeg.deleteFile('out.mp4');
     updateUI("Done!", 100);
 }
 
-async function downloadBatch(items) {
-    for (const item of items) {
-        const a = document.createElement('a');
-        a.href = item.direct_url; a.download = item.name;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        await new Promise(r => setTimeout(r, 2000));
-    }
-}
-
-async function downloadZip(items) {
-    const zip = new JSZip();
-    let processed = 0;
-    for (const item of items) {
-        processed++;
-        updateUI(`Adding ${item.name} to ZIP ${processed}/${items.length}`, (processed / items.length) * 80);
-        const res = await fetch(item.direct_url);
-        zip.file(item.name, await res.blob());
-        await new Promise(r => setTimeout(r, 1000));
-    }
-    updateUI("Assembling ZIP...", 90);
-    const blob = await zip.generateAsync({type: "blob"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = "DriveBatch_Archive.zip";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    updateUI("ZIP Download completed!", 100);
-}
-
+// --- DOM CONFIGURATION BINDINGS ---
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('download-zip').addEventListener('click', () => downloadZip(window.currentScanItems));
-    document.getElementById('download-individual').addEventListener('click', () => downloadBatch(window.currentScanItems));
+    const zipBtn = document.getElementById('download-zip');
+    const individualBtn = document.getElementById('download-individual');
+    
+    if (zipBtn) {
+        zipBtn.addEventListener('click', () => downloadZip(window.currentScanItems));
+    }
+    if (individualBtn) {
+        individualBtn.addEventListener('click', () => downloadBatch(window.currentScanItems));
+    }
 });
