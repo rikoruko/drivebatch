@@ -690,6 +690,7 @@ def compress_one_video(
     metadata = service.files().get(
         fileId=file_id,
         fields="id,name,mimeType,size",
+        supportsAllDrives=True
     ).execute()
     filename = safe_name(
         metadata.get("name", f"video_{file_index}")
@@ -792,6 +793,7 @@ def zip_worker(
                             "id,name,mimeType,size,"
                             "videoMediaMetadata(durationMillis)"
                         ),
+                        supportsAllDrives=True
                     ).execute()
 
                     filename = safe_name(
