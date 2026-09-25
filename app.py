@@ -20,7 +20,7 @@ SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 def add_security_headers(response):
     """
     Required security headers to enable SharedArrayBuffer in modern browsers.
-    This unlocks multi-threaded WASM performance for client-side FFmpeg compression.
+    Unlocks multi-threaded WASM performance for client-side operations.
     """
     response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
     response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
@@ -72,7 +72,8 @@ def fetch_files_recursive(service, folder_id: str, mime_prefix: str, parent_path
             q=query,
             pageSize=100,
             pageToken=page_token,
-            fields="nextPageToken, files(id, name, mimeType, size, thumbnailLink, webViewLink)"
+            # Requested videoMediaMetadata and webContentLink for stream processing
+            fields="nextPageToken, files(id, name, mimeType, size, thumbnailLink, webViewLink, webContentLink, videoMediaMetadata)"
         ).execute()
 
         files = results.get("files", [])
@@ -84,12 +85,16 @@ def fetch_files_recursive(service, folder_id: str, mime_prefix: str, parent_path
             elif mime_prefix == "*" or m_type.startswith(mime_prefix):
                 f["path"] = parent_path or "Google Drive"
                 
-                # Direct Google Drive URL for client-side JS fetches (Zero Cloud Egress)
                 file_id = f.get("id")
+                
+                # Original master binary endpoint
                 if api_key:
                     f["direct_url"] = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={api_key}"
                 else:
                     f["direct_url"] = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+
+                # Google Drive pre-processed video preview stream endpoint
+                f["google_stream_url"] = f"https://drive.google.com/videoplayback?id={file_id}"
 
                 collected.append(f)
 
@@ -131,8 +136,8 @@ def auth_status():
 @app.route("/api/scan", methods=["POST"])
 def scan_folder():
     """
-    Scans Google Drive folder hierarchy and returns file metadata directly to the frontend.
-    Zero byte content is proxy-downloaded through the backend.
+    Scans Google Drive folder hierarchy and returns metadata directly to the client.
+    No binary data passes through this server.
     """
     data = request.get_json() or {}
     url = data.get("url") or data.get("folder_url") or data.get("folder_id")
