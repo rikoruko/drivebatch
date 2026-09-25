@@ -1,187 +1,119 @@
 import os
 import re
-from typing import Any, Dict, List, Optional
-
-from flask import Flask, jsonify, render_template, request
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
+from flask import Flask, request, jsonify, render_template
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "drivebatch-dev-secret-key-change-in-prod")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# API Key or Service Account credentials for public Google Drive scanning
+DRIVE_API_KEY = os.getenv("GOOGLE_DRIVE_API_KEY", "")
 
+def extract_folder_id(url):
+    """Extract folder ID from a Google Drive URL."""
+    match = re.search(r'folders/([a-zA-Z0-9_-]+)', url)
+    if match:
+        return match.group(1)
+    match = re.search(r'id=([a-zA-Z0-9_-]+)', url)
+    if match:
+        return match.group(1)
+    return None
 
-@app.after_request
-def add_security_headers(response):
-    """
-    Required security headers to enable SharedArrayBuffer in modern browsers.
-    Unlocks multi-threaded WASM performance for client-side operations.
-    """
-    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-    response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
-    return response
+def build_drive_service():
+    """Build public Google Drive API service using API key."""
+    if not DRIVE_API_KEY:
+        raise ValueError("GOOGLE_DRIVE_API_KEY environment variable is not set.")
+    return build('drive', 'v3', developerKey=DRIVE_API_KEY)
 
+def scan_drive_folder(folder_id, media_type="video"):
+    """Recursively list files inside a public Google Drive folder."""
+    service = build_drive_service()
+    
+    mime_type_filters = {
+        "video": "mimeType contains 'video/'",
+        "image": "mimeType contains 'image/'",
+        "audio": "mimeType contains 'audio/'"
+    }
+    file_filter = mime_type_filters.get(media_type, "mimeType contains 'video/'")
+    
+    items = []
+    folders_to_scan = [(folder_id, "")]
 
-def extract_folder_id(url_or_id: str) -> str:
-    if not url_or_id:
-        return ""
+    while folders_to_scan:
+        current_folder_id, current_path = folders_to_scan.pop(0)
+        
+        # 1. Fetch sub-folders for recursive scanning
+        folder_query = f"'{current_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        try:
+            folder_res = service.files().list(q=folder_query, fields="nextPageToken, files(id, name)").execute()
+            for subfolder in folder_res.get('files', []):
+                subpath = f"{current_path}/{subfolder['name']}" if current_path else subfolder['name']
+                folders_to_scan.append((subfolder['id'], subpath))
+        except HttpError as e:
+            print(f"Error fetching subfolders: {e}")
 
-    url_or_id = url_or_id.strip()
+        # 2. Fetch target media files
+        file_query = f"'{current_folder_id}' in parents and {file_filter} and trashed = false"
+        page_token = None
+        while True:
+            try:
+                res = service.files().list(
+                    q=file_query,
+                    fields="nextPageToken, files(id, name, size, mimeType)",
+                    pageToken=page_token
+                ).execute()
 
-    patterns = [
-        r"folders/([a-zA-Z0-9_-]+)",
-        r"id=([a-zA-Z0-9_-]+)",
-        r"^([a-zA-Z0-9_-]+)$",
-    ]
+                for file in res.get('files', []):
+                    # Direct export URL for zero-egress client downloads
+                    direct_url = f"https://drive.google.com/uc?export=download&id={file['id']}"
+                    
+                    items.append({
+                        "id": file['id'],
+                        "name": file['name'],
+                        "size": int(file.get('size', 0)),
+                        "path": current_path or "Root",
+                        "mimeType": file.get('mimeType', ''),
+                        "direct_url": direct_url
+                    })
 
-    for pattern in patterns:
-        match = re.search(pattern, url_or_id)
-        if match:
-            return match.group(1)
+                page_token = res.get('nextPageToken')
+                if not page_token:
+                    break
+            except HttpError as e:
+                print(f"Error fetching files: {e}")
+                break
 
-    return url_or_id
-
-
-def build_drive_service(credentials_data: Optional[Dict] = None):
-    if credentials_data:
-        creds = Credentials.from_authorized_user_info(credentials_data, SCOPES)
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        return build("drive", "v3", credentials=creds)
-
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if api_key:
-        return build("drive", "v3", developerKey=api_key)
-
-    return build("drive", "v3")
-
-
-def fetch_files_recursive(service, folder_id: str, mime_prefix: str, parent_path: str = "") -> List[Dict[str, Any]]:
-    collected = []
-    query = f"'{folder_id}' in parents and trashed = false"
-    page_token = None
-    api_key = os.environ.get("GOOGLE_API_KEY", "")
-
-    while True:
-        results = service.files().list(
-            q=query,
-            pageSize=100,
-            pageToken=page_token,
-            # Requested videoMediaMetadata and webContentLink for stream processing
-            fields="nextPageToken, files(id, name, mimeType, size, thumbnailLink, webViewLink, webContentLink, videoMediaMetadata)"
-        ).execute()
-
-        files = results.get("files", [])
-        for f in files:
-            m_type = f.get("mimeType", "")
-            if m_type == "application/vnd.google-apps.folder":
-                sub_path = f"{parent_path}/{f['name']}" if parent_path else f['name']
-                collected.extend(fetch_files_recursive(service, f["id"], mime_prefix, sub_path))
-            elif mime_prefix == "*" or m_type.startswith(mime_prefix):
-                f["path"] = parent_path or "Google Drive"
-                
-                file_id = f.get("id")
-                
-                # Original master binary endpoint
-                if api_key:
-                    f["direct_url"] = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={api_key}"
-                else:
-                    f["direct_url"] = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-
-                # Google Drive pre-processed video preview stream endpoint
-                f["google_stream_url"] = f"https://drive.google.com/videoplayback?id={file_id}"
-
-                collected.append(f)
-
-        page_token = results.get("nextPageToken")
-        if not page_token:
-            break
-
-    return collected
-
-
-# -------------------------------------------------------------------
-# PAGES
-# -------------------------------------------------------------------
+    return items
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
-
-@app.route("/privacy")
-def privacy():
-    return render_template("privacy.html")
-
-
-@app.route("/terms")
-def terms():
-    return render_template("terms.html")
-
-
-# -------------------------------------------------------------------
-# ZERO-EGRESS METADATA API
-# -------------------------------------------------------------------
-
-@app.route("/api/auth/status")
-def auth_status():
-    return jsonify({"connected": False, "public_only": True})
-
-
 @app.route("/api/scan", methods=["POST"])
-def scan_folder():
-    """
-    Scans Google Drive folder hierarchy and returns metadata directly to the client.
-    No binary data passes through this server.
-    """
+def scan():
     data = request.get_json() or {}
-    url = data.get("url") or data.get("folder_url") or data.get("folder_id")
+    url = data.get("url", "").strip()
     media_type = data.get("media_type", "video")
 
     if not url:
-        return jsonify({"error": "Google Drive folder link is required."}), 400
+        return jsonify({"error": "Drive URL is required."}), 400
 
     folder_id = extract_folder_id(url)
     if not folder_id:
-        return jsonify({"error": "Invalid Google Drive link."}), 400
+        return jsonify({"error": "Invalid Google Drive folder link."}), 400
 
     try:
-        service = build_drive_service()
+        items = scan_drive_folder(folder_id, media_type)
+        key_name = "images" if media_type == "image" else "audio" if media_type == "audio" else "videos"
+        return jsonify({key_name: items})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-        mime_prefix = "video/"
-        if media_type == "image":
-            mime_prefix = "image/"
-        elif media_type == "audio":
-            mime_prefix = "audio/"
-
-        items = fetch_files_recursive(service, folder_id, mime_prefix)
-
-        return jsonify({
-            "success": True,
-            "folder_id": folder_id,
-            "videos": items if media_type == "video" else [],
-            "images": items if media_type == "image" else [],
-            "audio": items if media_type == "audio" else [],
-            "count": len(items),
-            "media_type": media_type
-        })
-
-    except HttpError as err:
-        return jsonify({"error": f"Google Drive API Error: {err._get_reason()}"}), 400
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-
-@app.route("/healthz")
-def healthz():
-    return jsonify({"ok": True, "zero_egress": True})
-
+@app.route("/api/auth/status", methods=["GET"])
+def auth_status():
+    return jsonify({"connected": True})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=os.environ.get("FLASK_ENV") != "production")
+    app.run(host="0.0.0.0", port=5000, debug=True)
