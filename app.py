@@ -1,6 +1,7 @@
 import os
 import re
-from flask import Flask, request, jsonify, render_template
+import requests
+from flask import Flask, request, jsonify, render_template, Response, stream_with_context
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -75,9 +76,9 @@ def scan_drive_folder(folder_id, media_type="video"):
             ).execute()
 
             for file in res.get('files', []):
-                # Include confirm parameter to bypass Google's large-file virus scan warning page during client fetch
                 file_id = file['id']
-                direct_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+                # Route direct_url through the Flask proxy to prevent browser CORS / NetworkErrors
+                direct_url = f"/api/download/{file_id}"
                 
                 items.append({
                     "id": file_id,
@@ -123,6 +124,27 @@ def scan():
         items = scan_drive_folder(folder_id, media_type)
         key_name = "images" if media_type == "image" else "audio" if media_type == "audio" else "videos"
         return jsonify({key_name: items})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/download/<file_id>")
+def proxy_download(file_id):
+    """Proxy file downloads through Flask to completely bypass browser CORS restrictions."""
+    target_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+    try:
+        req = requests.get(target_url, stream=True, allow_redirects=True)
+        
+        def generate():
+            for chunk in req.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+                    
+        headers = {
+            "Content-Type": req.headers.get("Content-Type", "application/octet-stream"),
+            "Content-Disposition": req.headers.get("Content-Disposition", f"attachment; filename={file_id}")
+        }
+        
+        return Response(stream_with_context(generate()), headers=headers)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
