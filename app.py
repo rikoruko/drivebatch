@@ -19,13 +19,12 @@ def extract_folder_id(url):
     match = re.search(r'id=([a-zA-Z0-9_-]+)', url)
     if match:
         return match.group(1)
-    # Fallback if raw ID is passed directly
     if re.match(r'^[a-zA-Z0-9_-]+$', url):
         return url
     return None
 
 def build_drive_service():
-    """Build public Google Drive API service using API key (checking multiple environment variable names)."""
+    """Build public Google Drive API service using API key."""
     api_key = os.getenv("GOOGLE_DRIVE_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
     if not api_key:
         raise ValueError("GOOGLE_DRIVE_API_KEY environment variable is not set.")
@@ -50,43 +49,34 @@ def scan_drive_folder(folder_id, media_type="video"):
         
         # 1. Fetch sub-folders for recursive scanning
         folder_query = f"'{current_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        try:
-            folder_res = service.files().list(q=folder_query, fields="nextPageToken, files(id, name)").execute()
-            for subfolder in folder_res.get('files', []):
-                subpath = f"{current_path}/{subfolder['name']}" if current_path else subfolder['name']
-                folders_to_scan.append((subfolder['id'], subpath))
-        except HttpError as e:
-            print(f"Error fetching subfolders: {e}")
+        folder_res = service.files().list(q=folder_query, fields="nextPageToken, files(id, name)").execute()
+        for subfolder in folder_res.get('files', []):
+            subpath = f"{current_path}/{subfolder['name']}" if current_path else subfolder['name']
+            folders_to_scan.append((subfolder['id'], subpath))
 
         # 2. Fetch target media files
         file_query = f"'{current_folder_id}' in parents and {file_filter} and trashed = false"
         page_token = None
         while True:
-            try:
-                res = service.files().list(
-                    q=file_query,
-                    fields="nextPageToken, files(id, name, size, mimeType)",
-                    pageToken=page_token
-                ).execute()
+            res = service.files().list(
+                q=file_query,
+                fields="nextPageToken, files(id, name, size, mimeType)",
+                pageToken=page_token
+            ).execute()
 
-                for file in res.get('files', []):
-                    # Direct export URL for zero-egress client downloads
-                    direct_url = f"https://drive.google.com/uc?export=download&id={file['id']}"
-                    
-                    items.append({
-                        "id": file['id'],
-                        "name": file['name'],
-                        "size": int(file.get('size', 0)),
-                        "path": current_path or "Root",
-                        "mimeType": file.get('mimeType', ''),
-                        "direct_url": direct_url
-                    })
+            for file in res.get('files', []):
+                direct_url = f"https://drive.google.com/uc?export=download&id={file['id']}"
+                items.append({
+                    "id": file['id'],
+                    "name": file['name'],
+                    "size": int(file.get('size', 0)),
+                    "path": current_path or "Root",
+                    "mimeType": file.get('mimeType', ''),
+                    "direct_url": direct_url
+                })
 
-                page_token = res.get('nextPageToken')
-                if not page_token:
-                    break
-            except HttpError as e:
-                print(f"Error fetching files: {e}")
+            page_token = res.get('nextPageToken')
+            if not page_token:
                 break
 
     return items
@@ -130,3 +120,4 @@ def auth_status():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
+    
