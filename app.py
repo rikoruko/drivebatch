@@ -369,6 +369,17 @@ def scan_folder():
 def stream_single_file(file_id):
     try:
         api_key = os.environ.get("GOOGLE_API_KEY", "")
+        service = build_drive_service()
+        
+        # Try fetching original file name for disposition header
+        filename = f"media_{file_id}"
+        try:
+            file_meta = service.files().get(file_id=file_id, fields="name").execute()
+            if file_meta.get("name"):
+                filename = re.sub(r'[\\/*?:"<>|]', "_", file_meta["name"])
+        except Exception:
+            pass
+
         media_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
         req_headers = {}
 
@@ -388,7 +399,7 @@ def stream_single_file(file_id):
                 response_headers[header] = drive_res.headers[header]
 
         disposition = "attachment" if request.path.startswith("/api/video/") else "inline"
-        response_headers["Content-Disposition"] = f'{disposition}; filename="media_{file_id}"'
+        response_headers["Content-Disposition"] = f'{disposition}; filename="{filename}"'
 
         def generate():
             for chunk in drive_res.iter_content(chunk_size=1024 * 1024):
