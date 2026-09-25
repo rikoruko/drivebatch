@@ -77,7 +77,7 @@ def scan_drive_folder(folder_id, media_type="video"):
 
             for file in res.get('files', []):
                 file_id = file['id']
-                # Route direct_url through the Flask proxy to prevent browser CORS / NetworkErrors
+                # Route direct_url through the Flask proxy
                 direct_url = f"/api/download/{file_id}"
                 
                 items.append({
@@ -129,8 +129,14 @@ def scan():
 
 @app.route("/api/download/<file_id>")
 def proxy_download(file_id):
-    """Proxy file downloads through Flask to completely bypass browser CORS restrictions."""
+    """Proxy file downloads and Stream Saver variants through Flask to bypass CORS."""
     target_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+    
+    # Forward any extra query parameters (like Stream Saver's cpn parameter)
+    cpn = request.args.get("cpn")
+    if cpn:
+        target_url += f"&cpn={cpn}"
+
     try:
         req = requests.get(target_url, stream=True, allow_redirects=True)
         
@@ -155,3 +161,4 @@ def auth_status():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
+    
