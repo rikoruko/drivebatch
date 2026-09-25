@@ -47,12 +47,22 @@ def scan_drive_folder(folder_id, media_type="video"):
     while folders_to_scan:
         current_folder_id, current_path = folders_to_scan.pop(0)
         
-        # 1. Fetch sub-folders for recursive scanning
-        folder_query = f"'{current_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        folder_res = service.files().list(q=folder_query, fields="nextPageToken, files(id, name)").execute()
-        for subfolder in folder_res.get('files', []):
-            subpath = f"{current_path}/{subfolder['name']}" if current_path else subfolder['name']
-            folders_to_scan.append((subfolder['id'], subpath))
+        # 1. Fetch sub-folders for recursive scanning (with pagination support)
+        page_token = None
+        while True:
+            folder_res = service.files().list(
+                q=f"'{current_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+                fields="nextPageToken, files(id, name)",
+                pageToken=page_token
+            ).execute()
+            
+            for subfolder in folder_res.get('files', []):
+                subpath = f"{current_path}/{subfolder['name']}" if current_path else subfolder['name']
+                folders_to_scan.append((subfolder['id'], subpath))
+                
+            page_token = folder_res.get('nextPageToken')
+            if not page_token:
+                break
 
         # 2. Fetch target media files
         file_query = f"'{current_folder_id}' in parents and {file_filter} and trashed = false"
@@ -65,9 +75,12 @@ def scan_drive_folder(folder_id, media_type="video"):
             ).execute()
 
             for file in res.get('files', []):
-                direct_url = f"https://drive.google.com/uc?export=download&id={file['id']}"
+                # Include confirm parameter to bypass Google's large-file virus scan warning page during client fetch
+                file_id = file['id']
+                direct_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+                
                 items.append({
-                    "id": file['id'],
+                    "id": file_id,
                     "name": file['name'],
                     "size": int(file.get('size', 0)),
                     "path": current_path or "Root",
@@ -120,4 +133,3 @@ def auth_status():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
-    
