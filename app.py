@@ -1,325 +1,308 @@
-import os
 import io
-import re
 import json
-import uuid
-import time
+import os
+import re
 import shutil
-import zipfile
 import tempfile
 import threading
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+import uuid
+import zipfile
+from typing import Any, Dict, List, Optional, Tuple
+
 import static_ffmpeg
 import requests
-
-
-static_ffmpeg.add_paths()
-
-from flask import (
-    Flask, render_template, request, jsonify,
-    send_file, Response, stream_with_context
-)
-from werkzeug.middleware.proxy_fix import ProxyFix
+from flask import Flask, Response, jsonify, render_template, request, send_file, stream_with_context
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from google.cloud import storage
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+# Ensure static_ffmpeg is ready before importing ffmpeg-python
+static_ffmpeg.add_paths()
+import ffmpeg
+
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "drivebatch-dev-secret-key-change-in-prod")
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
+JOBS: Dict[str, Dict[str, Any]] = {}
+JOBS_LOCK = threading.Lock()
+MAX_JOB_AGE_SECONDS = 3600 * 2
+
 
 @app.after_request
 def add_security_headers(response):
     response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
     response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
     return response
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
-app.secret_key = os.environ.get("SECRET_KEY", "drivebatch-secret")
-app.config["JSON_SORT_KEYS"] = False
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
-app.config["PREFERRED_URL_SCHEME"] = "https" if os.environ.get("FLASK_ENV") == "production" else "http"
-
-VIDEO_MIMES = {
-    "video/mp4",
-    "video/quicktime",
-    "video/x-msvideo",
-    "video/x-matroska",
-    "video/webm",
-    "video/mpeg",
-    "video/ogg",
-    "video/3gpp",
-    "video/x-flv",
-}
-
-IMAGE_MIMES = {
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/gif",
-    "image/bmp",
-    "image/heic",
-    "image/heif",
-    "image/tiff",
-    "image/svg+xml",
-}
-
-AUDIO_MIMES = {
-    "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav",
-    "audio/ogg", "audio/flac", "audio/aac", "audio/mp4",
-}
-
-VIDEO_EXTENSIONS = {
-    ".mp4", ".mov", ".avi", ".mkv", ".webm",
-    ".mpeg", ".mpg", ".m4v", ".3gp", ".flv", ".wmv"
-}
-
-IMAGE_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".webp", ".gif",
-    ".bmp", ".heic", ".heif", ".tif", ".tiff", ".svg"
-}
-
-AUDIO_EXTENSIONS = {
-    ".mp3", ".wav", ".ogg", ".oga", ".flac", ".aac", ".m4a", ".opus",
-}
-
-DOWNLOAD_JOBS = {}
-DOWNLOAD_LOCK = threading.Lock()
-
-COMPRESS_JOBS = {}
-COMPRESS_LOCK = threading.Lock()
-GCS_BUCKET = os.environ.get("GCS_BUCKET", "").strip()
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "").strip()
 
 
-def artifact_bucket():
-    if not GCS_BUCKET:
-        return None
-    return storage.Client().bucket(GCS_BUCKET)
+def get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    cleanup_old_jobs()
+    with JOBS_LOCK:
+        return JOBS.get(job_id)
 
 
-def store_artifact(job_id, path, filename):
-    bucket = artifact_bucket()
-    if not bucket:
-        return None
-    object_name = f"jobs/{job_id}/{safe_name(filename)}"
-    bucket.blob(object_name).upload_from_filename(path)
-    return object_name
+def set_job(job_id: str, **kwargs) -> None:
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            JOBS[job_id].update(kwargs)
 
 
-def materialize_artifact(job, key, suffix):
-    path = job.get(key)
-    if path and os.path.exists(path):
-        return path, False
-    object_name = job.get(f"{key}_object")
-    bucket = artifact_bucket()
-    if not object_name or not bucket:
-        return None, False
-    temporary = tempfile.NamedTemporaryFile(
-        prefix="drivebatch_artifact_",
-        suffix=suffix,
-        delete=False,
-    )
-    temporary.close()
-    bucket.blob(object_name).download_to_filename(temporary.name)
-    return temporary.name, True
+def cleanup_old_jobs() -> None:
+    now = time.time()
+    to_delete = []
+
+    with JOBS_LOCK:
+        for j_id, job in JOBS.items():
+            if now - job.get("created_at", now) > MAX_JOB_AGE_SECONDS:
+                to_delete.append(j_id)
+
+        for j_id in to_delete:
+            job = JOBS.pop(j_id, None)
+            if job and job.get("temp_dir") and os.path.exists(job["temp_dir"]):
+                try:
+                    shutil.rmtree(job["temp_dir"], ignore_errors=True)
+                except Exception:
+                    pass
 
 
-def drive_service():
-    if GOOGLE_API_KEY:
-        return build(
-            "drive",
-            "v3",
-            developerKey=GOOGLE_API_KEY,
-            cache_discovery=False,
-        )
+def extract_folder_id(url_or_id: str) -> str:
+    if not url_or_id:
+        return ""
 
-    return None
+    url_or_id = url_or_id.strip()
 
-
-def extract_folder_id(url):
     patterns = [
-        r"/folders/([a-zA-Z0-9_-]+)",
-        r"[?&]id=([a-zA-Z0-9_-]+)",
+        r"folders/([a-zA-Z0-9_-]+)",
+        r"id=([a-zA-Z0-9_-]+)",
+        r"^([a-zA-Z0-9_-]+)$",
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, url)
-
+        match = re.search(pattern, url_or_id)
         if match:
             return match.group(1)
 
-    return None
+    return url_or_id
 
 
-def is_video(file):
-    mime = str(
-        file.get("mimeType", "")
-    ).lower()
+def build_drive_service(credentials_data: Optional[Dict] = None):
+    if credentials_data:
+        creds = Credentials.from_authorized_user_info(credentials_data, SCOPES)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        return build("drive", "v3", credentials=creds)
 
-    if mime in VIDEO_MIMES:
-        return True
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if api_key:
+        return build("drive", "v3", developerKey=api_key)
 
-    name = str(
-        file.get("name", "")
-    ).lower()
-
-    extension = os.path.splitext(name)[1]
-
-    return extension in VIDEO_EXTENSIONS
+    return build("drive", "v3")
 
 
-def is_image(file):
-    mime = str(
-        file.get("mimeType", "")
-    ).lower()
-
-    if mime in IMAGE_MIMES:
-        return True
-
-    name = str(
-        file.get("name", "")
-    ).lower()
-
-    extension = os.path.splitext(name)[1]
-
-    return extension in IMAGE_EXTENSIONS
-
-
-def is_audio(file):
-    mime = str(file.get("mimeType", "")).lower()
-    if mime in AUDIO_MIMES:
-        return True
-    name = str(file.get("name", "")).lower()
-    return os.path.splitext(name)[1] in AUDIO_EXTENSIONS
-
-
-def safe_name(name):
-    name = str(name or "video")
-    name = name.replace("\x00", "")
-    name = re.sub(
-        r'[<>:"/\\|?*]',
-        "_",
-        name
-    )
-
-    return name.strip() or "video"
-
-
-def list_children(service, folder_id):
-    files = []
+def fetch_files_recursive(service, folder_id: str, mime_prefix: str, parent_path: str = "") -> List[Dict[str, Any]]:
+    collected = []
+    query = f"'{folder_id}' in parents and trashed = false"
     page_token = None
 
     while True:
-        response = service.files().list(
-            q=(
-                f"'{folder_id}' in parents "
-                "and trashed = false"
-            ),
-            fields=(
-                "nextPageToken,"
-                "files(id,name,mimeType,size,"
-                "shortcutDetails)"
-            ),
-            pageSize=1000,
+        results = service.files().list(
+            q=query,
+            pageSize=100,
             pageToken=page_token,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
+            fields="nextPageToken, files(id, name, mimeType, size, thumbnailLink, webViewLink)"
         ).execute()
 
-        files.extend(response.get("files", []))
+        files = results.get("files", [])
+        for f in files:
+            m_type = f.get("mimeType", "")
+            if m_type == "application/vnd.google-apps.folder":
+                sub_path = f"{parent_path}/{f['name']}" if parent_path else f['name']
+                collected.extend(fetch_files_recursive(service, f["id"], mime_prefix, sub_path))
+            elif mime_prefix == "*" or m_type.startswith(mime_prefix):
+                f["path"] = parent_path or "Google Drive"
+                collected.append(f)
 
-        page_token = response.get("nextPageToken")
-
+        page_token = results.get("nextPageToken")
         if not page_token:
             break
 
-    return files
+    return collected
 
 
-def scan_recursive(
-    service,
-    folder_id,
-    path="",
-    visited=None,
-    media_type="video",
-):
-    if visited is None:
-        visited = set()
+def download_drive_file(service, file_id: str, destination_path: str) -> bool:
+    try:
+        drive_request = service.files().get_media(file_id=file_id)
+        with open(destination_path, "wb") as f:
+            downloader = MediaIoBaseDownload(f, drive_request, chunksize=1024 * 1024 * 5)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+        return True
+    except Exception:
+        api_key = os.environ.get("GOOGLE_API_KEY", "")
+        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        params = {"key": api_key} if api_key else {}
+        response = requests.get(url, params=params, stream=True, timeout=60)
+        if response.status_code in (200, 206):
+            with open(destination_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024 * 5):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        return False
 
-    if folder_id in visited:
-        return []
 
-    visited.add(folder_id)
+def get_preset_for_quality(quality: str) -> Tuple[str, str, str, str]:
+    q = (quality or "720p").lower()
 
-    results = []
+    if q in ["360p"]:
+        return "640x360", "30", "600k", "64k"
+    elif q in ["480p", "low"]:
+        return "854x480", "28", "1000k", "96k"
+    elif q in ["1080p", "high"]:
+        return "1920x1080", "20", "4000k", "192k"
+    else:
+        return "1280x720", "23", "2000k", "128k"
 
-    for item in list_children(service, folder_id):
 
-        name = item.get("name", "Untitled")
-        mime = item.get("mimeType", "")
-        item_id = item.get("id")
+def compress_video_ffmpeg(input_path: str, output_path: str, quality: str = "720p") -> bool:
+    scale, crf, video_bitrate, audio_bitrate = get_preset_for_quality(quality)
 
-        shortcut = item.get("shortcutDetails")
-
-        if shortcut:
-            target_id = shortcut.get("targetId")
-            target_mime = shortcut.get("targetMimeType")
-
-            if target_id:
-                item_id = target_id
-                mime = target_mime or mime
-
-        current_path = (
-            f"{path}/{name}"
-            if path
-            else name
-        )
-
-        if mime == "application/vnd.google-apps.folder":
-
-            results.extend(
-                scan_recursive(
-                    service,
-                    item_id,
-                    current_path,
-                    visited,
-                    media_type,
-                )
+    try:
+        (
+            ffmpeg.input(input_path)
+            .output(
+                output_path,
+                vf=f"scale={scale}:force_original_aspect_ratio=decrease,pad={scale}:(ow-iw)/2:(oh-ih)/2",
+                vcodec="libx264",
+                crf=crf,
+                preset="fast",
+                acodec="aac",
+                audio_bitrate=audio_bitrate,
+                movflags="+faststart",
             )
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        return True
+    except ffmpeg.Error:
+        return False
 
-        elif media_type == "video" and is_video(item):
 
-            results.append({
-                "id": item_id,
-                "name": name,
-                "mimeType": mime,
-                "size": int(item.get("size") or 0),
-                "path": current_path,
-                "type": "video",
-            })
+def zip_worker(job_id: str, file_ids: List[str], credentials: Optional[Dict]):
+    temp_dir = tempfile.mkdtemp(prefix=f"drivebatch_zip_{job_id}_")
+    set_job(job_id, temp_dir=temp_dir, status="processing", message="Initializing Google Drive connection...")
 
-        elif media_type == "image" and is_image(item):
+    try:
+        service = build_drive_service(credentials)
+        downloaded_files = []
+        total = len(file_ids)
 
-            results.append({
-                "id": item_id,
-                "name": name,
-                "mimeType": mime,
-                "size": int(item.get("size") or 0),
-                "path": current_path,
-                "type": "image",
-            })
+        for index, file_id in enumerate(file_ids):
+            job = get_job(job_id)
+            if job and job.get("cancelled"):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return
 
-        elif media_type == "audio" and is_audio(item):
+            set_job(job_id, message=f"Downloading file {index + 1} of {total}...", completed=index, progress=int((index / total) * 90))
 
-            results.append({
-                "id": item_id,
-                "name": name,
-                "mimeType": mime,
-                "size": int(item.get("size") or 0),
-                "path": current_path,
-                "type": "audio",
-            })
+            try:
+                file_meta = service.files().get(file_id=file_id, fields="name").execute()
+                original_name = file_meta.get("name", f"file_{file_id}")
+            except Exception:
+                original_name = f"file_{file_id}"
 
-    return results
+            safe_name = re.sub(r'[\\/*?:"<>|]', "_", original_name)
+            out_path = os.path.join(temp_dir, safe_name)
 
+            if download_drive_file(service, file_id, out_path):
+                downloaded_files.append((out_path, safe_name))
+
+        if not downloaded_files:
+            set_job(job_id, status="failed", error="Failed to download selected files.", message="ZIP creation failed.")
+            return
+
+        set_job(job_id, message="Creating ZIP archive...", progress=95)
+        zip_filename = os.path.join(temp_dir, "DriveBatch.zip")
+
+        with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for filepath, arcname in downloaded_files:
+                zipf.write(filepath, arcname=arcname)
+
+        set_job(job_id, status="done", completed=total, progress=100, message="ZIP ready!", zip_path=zip_filename)
+
+    except Exception as exc:
+        set_job(job_id, status="failed", error=str(exc), message="An error occurred.")
+
+
+def compress_worker(job_id: str, file_ids: List[str], credentials: Optional[Dict], quality: str):
+    temp_dir = tempfile.mkdtemp(prefix=f"drivebatch_comp_{job_id}_")
+    set_job(job_id, temp_dir=temp_dir, status="processing", message="Initializing Google Drive connection...")
+
+    try:
+        service = build_drive_service(credentials)
+        processed_files = []
+        total = len(file_ids)
+
+        for index, file_id in enumerate(file_ids):
+            job = get_job(job_id)
+            if job and job.get("cancelled"):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return
+
+            set_job(job_id, message=f"Compressing file {index + 1} of {total}...", completed=index, progress=int((index / total) * 100))
+
+            try:
+                file_meta = service.files().get(file_id=file_id, fields="name").execute()
+                original_name = file_meta.get("name", f"video_{file_id}.mp4")
+            except Exception:
+                original_name = f"video_{file_id}.mp4"
+
+            safe_basename = os.path.splitext(original_name)[0]
+            safe_basename = re.sub(r'[\\/*?:"<>|]', "_", safe_basename)
+
+            raw_input_path = os.path.join(temp_dir, f"raw_{file_id}.tmp")
+            out_output_path = os.path.join(temp_dir, f"{safe_basename}_{quality}.mp4")
+
+            if download_drive_file(service, file_id, raw_input_path):
+                if compress_video_ffmpeg(raw_input_path, out_output_path, quality):
+                    processed_files.append(out_output_path)
+
+            if os.path.exists(raw_input_path):
+                try:
+                    os.remove(raw_input_path)
+                except Exception:
+                    pass
+
+        if not processed_files:
+            set_job(job_id, status="failed", error="Failed to download or compress selected files.", message="Compression failed.")
+            return
+
+        if len(processed_files) == 1:
+            set_job(job_id, status="done", completed=total, progress=100, message="Compression complete!", file_path=processed_files[0])
+        else:
+            zip_filename = os.path.join(temp_dir, f"DriveBatch_Compressed_{quality}.zip")
+            with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for file_path in processed_files:
+                    zipf.write(file_path, arcname=os.path.basename(file_path))
+
+            set_job(job_id, status="done", completed=total, progress=100, message="Compression complete!", zip_path=zip_filename)
+
+    except Exception as exc:
+        set_job(job_id, status="failed", error=str(exc), message="An error occurred.")
+
+
+# -------------------------------------------------------------------
+# ROUTES
+# -------------------------------------------------------------------
 
 @app.route("/")
 def index():
@@ -342,1235 +325,188 @@ def auth_status():
 
 
 @app.route("/api/scan", methods=["POST"])
-def api_scan():
+def scan_folder():
+    data = request.get_json() or {}
+    url = data.get("url") or data.get("folder_url") or data.get("folder_id")
+    media_type = data.get("media_type", "video")
+
+    if not url:
+        return jsonify({"error": "Google Drive folder link is required."}), 400
+
+    folder_id = extract_folder_id(url)
+    if not folder_id:
+        return jsonify({"error": "Invalid Google Drive link."}), 400
+
     try:
-        service = drive_service()
+        service = build_drive_service()
 
-        if not service:
-            return jsonify({
-                "error": "Public Google Drive access is not configured."
-            }), 401
+        mime_prefix = "video/"
+        if media_type == "image":
+            mime_prefix = "image/"
+        elif media_type == "audio":
+            mime_prefix = "audio/"
 
-        data = request.get_json(
-            silent=True
-        ) or {}
-
-        url = str(
-            data.get("url", "")
-        ).strip()
-        media_type = str(
-            data.get("media_type", "video")
-        ).strip().lower()
-
-        if media_type not in {"video", "image", "audio"}:
-            return jsonify({
-                "error": "media_type must be video, image, or audio."
-            }), 400
-
-        if not url:
-            return jsonify({
-                "error": "Please provide a Google Drive folder link."
-            }), 400
-
-        folder_id = extract_folder_id(url)
-
-        if not folder_id:
-            return jsonify({
-                "error": "Could not find the Drive folder ID."
-            }), 400
-
-        items = scan_recursive(
-            service,
-            folder_id,
-            media_type=media_type,
-        )
+        items = fetch_files_recursive(service, folder_id, mime_prefix)
 
         return jsonify({
             "success": True,
-            "videos": items,
+            "folder_id": folder_id,
+            "videos": items if media_type == "video" else [],
             "images": items if media_type == "image" else [],
             "audio": items if media_type == "audio" else [],
             "count": len(items),
-            "media_type": media_type,
+            "media_type": media_type
         })
 
+    except HttpError as err:
+        return jsonify({"error": f"Google Drive API Error: {err._get_reason()}"}), 400
     except Exception as exc:
-        return jsonify({
-            "error": str(exc)
-        }), 500
+        return jsonify({"error": str(exc)}), 500
 
 
-def set_job(job_id, **values):
-    with DOWNLOAD_LOCK:
-        if job_id in DOWNLOAD_JOBS:
-            DOWNLOAD_JOBS[job_id].update(values)
-
-
-def get_job(job_id):
-    with DOWNLOAD_LOCK:
-        return DOWNLOAD_JOBS.get(job_id)
-
-
-def set_compress_job(job_id, **values):
-    with COMPRESS_LOCK:
-        if job_id in COMPRESS_JOBS:
-            COMPRESS_JOBS[job_id].update(values)
-
-
-def get_compress_job(job_id):
-    with COMPRESS_LOCK:
-        return COMPRESS_JOBS.get(job_id)
-
-
-def download_drive_file(credentials, file_id, output_path):
-    # Try the direct 'uc' download URL with confirm=t to bypass virus scan warnings
-    url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
-    
-    response = requests.get(
-        url,
-        stream=True,
-        timeout=60,
-        allow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    )
-
-    if "text/html" in response.headers.get("Content-Type", ""):
-        # Fallback to API if the direct link still returns HTML (e.g. still blocked)
-        if not GOOGLE_API_KEY:
-            raise RuntimeError("Public Google Drive access is not configured.")
-        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-        response = requests.get(
-            url,
-            params={"key": GOOGLE_API_KEY},
-            stream=True,
-            timeout=60,
-            headers={"Range": "bytes=0-"},
-        )
-        if response.status_code not in (200, 206):
-            raise RuntimeError(
-                f"HTTP {response.status_code} while downloading file {file_id}"
-            )
-
-    with open(output_path, "wb") as output:
-        for chunk in response.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                output.write(chunk)
-
-
-def compress_video(
-    input_path,
-    output_path,
-    quality,
-    progress_callback=None,
-):
-    quality_map = {
-        "360p": 360,
-        "480p": 480,
-        "720p": 720,
-        "1080p": 1080
-    }
-    height = quality_map.get(quality, 720)
-    
-    cmd = [
-        "ffmpeg",
-        "-nostdin",
-        "-loglevel", "error",
-        "-progress", "pipe:1",
-        "-nostats",
-        "-i", input_path,
-        "-vf", f"scale='min({height},iw)':-2",
-        "-c:v", "libx264",
-        "-crf", "26",
-        "-preset", "veryfast",
-        "-c:a", "aac",
-        "-movflags", "+faststart",
-        "-y",
-        output_path
-    ]
-    
+@app.route("/api/preview/<file_id>")
+@app.route("/api/video/<file_id>")
+def stream_single_file(file_id):
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
+        api_key = os.environ.get("GOOGLE_API_KEY", "")
+        media_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        req_headers = {}
 
-        for line in process.stdout or ():
-            if progress_callback and line.startswith("out_time_ms="):
-                try:
-                    progress_callback(int(line.split("=", 1)[1]) / 1000000)
-                except (TypeError, ValueError):
-                    pass
+        range_header = request.headers.get("Range")
+        if range_header:
+            req_headers["Range"] = range_header
 
-        return process.wait() == 0
-    except Exception:
-        if "process" in locals() and process.poll() is None:
-            process.kill()
-            process.wait()
-        return False
+        params = {"key": api_key} if api_key else {}
+        drive_res = requests.get(media_url, params=params, headers=req_headers, stream=True, timeout=60)
 
+        if drive_res.status_code not in (200, 206):
+            return jsonify({"error": f"Failed to stream file (HTTP {drive_res.status_code})"}), drive_res.status_code
 
-def cloudconvert_video(
-    input_path,
-    output_path,
-    quality,
-    job_id,
-    filename,
-    file_index,
-    total_files,
-):
-    api_key = os.environ.get("CLOUDCONVERT_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError(
-            "CLOUDCONVERT_API_KEY is not configured."
-        )
+        response_headers = {}
+        for header in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]:
+            if header in drive_res.headers:
+                response_headers[header] = drive_res.headers[header]
 
-    height = {
-        "360p": 360,
-        "480p": 480,
-        "720p": 720,
-        "1080p": 1080,
-    }[quality]
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+        disposition = "attachment" if request.path.startswith("/api/video/") else "inline"
+        response_headers["Content-Disposition"] = f'{disposition}; filename="media_{file_id}"'
 
-    def require_cloudconvert_success(response):
-        if response.ok:
-            return
-        try:
-            details = response.json().get("message")
-        except ValueError:
-            details = None
-        if not details:
-            details = response.text[:300].strip()
-        raise RuntimeError(
-            f"CloudConvert API returned {response.status_code}: {details}"
-        )
+        def generate():
+            for chunk in drive_res.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    yield chunk
 
-    job_response = requests.post(
-        "https://api.cloudconvert.com/v2/jobs",
-        headers=headers,
-        json={
-            "tasks": {
-                "upload": {"operation": "import/upload"},
-                "convert": {
-                    "operation": "convert",
-                    "input": "upload",
-                    "output_format": "mp4",
-                    "video_codec": "x264",
-                    "height": height,
-                    "preset": "veryfast",
-                    "crf": 26,
-                },
-                "export": {
-                    "operation": "export/url",
-                    "input": "convert",
-                    "inline": False,
-                },
-            }
-        },
-        timeout=30,
-    )
-    require_cloudconvert_success(job_response)
-    job = job_response.json()["data"]
-    upload_task = next(
-        task for task in job["tasks"] if task["name"] == "upload"
-    )
-    upload_url = upload_task["result"]["form"]["url"]
-    upload_parameters = upload_task["result"]["form"]["parameters"]
-
-    with open(input_path, "rb") as source:
-        set_compress_job(
-            job_id,
-            progress=max(
-                get_compress_job(job_id).get("progress", 0),
-                int((file_index - 1) / total_files * 100),
-            ),
-            message=(
-                f"Video {file_index} / {total_files}: "
-                "uploading to CloudConvert..."
-            ),
-        )
-        upload_response = requests.post(
-            upload_url,
-            data=upload_parameters,
-            files={"file": (filename, source, "video/mp4")},
-            timeout=600,
-        )
-    upload_response.raise_for_status()
-
-    job_id_remote = job["id"]
-    while True:
-        current = requests.get(
-            f"https://api.cloudconvert.com/v2/jobs/{job_id_remote}",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=30,
-        )
-        require_cloudconvert_success(current)
-        data = current.json()["data"]
-        tasks = data.get("tasks", [])
-        convert_task = next(
-            (task for task in tasks if task["name"] == "convert"),
-            None,
-        )
-        percent = int((convert_task or {}).get("percent", 0) or 0)
-        overall_progress = min(
-            99,
-            max(
-                1,
-                int(
-                    ((file_index - 1) + percent / 100)
-                    / total_files
-                    * 100
-                ),
-            ),
-        )
-        current_job = get_compress_job(job_id)
-        set_compress_job(
-            job_id,
-            progress=max(
-                current_job.get("progress", 0) if current_job else 0,
-                overall_progress,
-            ),
-            message=(
-                f"Video {file_index} / {total_files}: "
-                f"CloudConvert {percent}% encoded..."
-            ),
-        )
-
-        local_job = get_compress_job(job_id)
-        if not local_job or local_job.get("cancelled"):
-            requests.post(
-                f"https://api.cloudconvert.com/v2/jobs/{job_id_remote}/cancel",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=30,
-            )
-            return False
-
-        if data["status"] == "finished":
-            export_task = next(
-                task for task in tasks if task["name"] == "export"
-            )
-            output_url = export_task["result"]["files"][0]["url"]
-            with requests.get(output_url, stream=True, timeout=600) as download:
-                require_cloudconvert_success(download)
-                with open(output_path, "wb") as output:
-                    for chunk in download.iter_content(1024 * 1024):
-                        if chunk:
-                            output.write(chunk)
-            return True
-
-        if data["status"] == "error":
-            errors = [
-                task.get("message", "CloudConvert task failed.")
-                for task in tasks
-                if task.get("status") == "error"
-            ]
-            raise RuntimeError("; ".join(errors))
-
-        time.sleep(2)
-
-
-def compress_one_video(
-    job_id,
-    file_id,
-    credentials,
-    quality,
-    file_index,
-    total_files,
-    temp_dir,
-):
-    service = drive_service()
-    if not service:
-        raise RuntimeError("Public Google Drive access is not configured.")
-    metadata = service.files().get(
-        fileId=file_id,
-        fields="id,name,mimeType,size",
-    ).execute()
-    filename = safe_name(
-        metadata.get("name", f"video_{file_index}")
-    )
-    if not filename.endswith(".mp4"):
-        filename += ".mp4"
-
-    input_path = os.path.join(
-        temp_dir,
-        f"input_{file_index}_{filename}",
-    )
-    output_path = os.path.join(
-        temp_dir,
-        f"output_{file_index}_{filename}",
-    )
-    set_compress_job(
-        job_id,
-        message=f"Video {file_index} / {total_files}: downloading {filename}...",
-    )
-    download_drive_file(credentials, file_id, input_path)
-
-    if os.path.getsize(input_path) < 1024 * 10:
-        raise RuntimeError(f"Download failed: received invalid file content for {filename}")
-
-        set_compress_job(
-        job_id,
-        message=f"Video {file_index} / {total_files}: starting local conversion...",
-    )
-
-    if not compress_video(input_path, output_path, quality):
-        raise RuntimeError(f"Failed to compress {filename} locally")
-
-    try:
-        os.remove(input_path)
-    except OSError:
-        pass
-    return file_index, output_path
-
-
-def zip_worker(
-    job_id,
-    file_ids,
-    credentials,
-):
-    temp_dir = tempfile.mkdtemp(
-        prefix="drivebatch_"
-    )
-
-    zip_path = os.path.join(
-        temp_dir,
-        "DriveBatch.zip"
-    )
-
-    set_job(job_id, temp_dir=temp_dir)
-
-    try:
-        service = drive_service()
-        if not service:
-            raise RuntimeError("Public Google Drive access is not configured.")
-        total = len(file_ids)
-
-        set_job(
-            job_id,
-            status="running",
-            total=total,
-            completed=0,
-            progress=0,
-            message="Starting ZIP...",
-        )
-
-        used_names = set()
-
-        with zipfile.ZipFile(
-            zip_path,
-            "w",
-            compression=zipfile.ZIP_DEFLATED,
-        ) as archive:
-
-            for index, file_id in enumerate(
-                file_ids,
-                start=1
-            ):
-                job = get_job(job_id)
-
-                if not job:
-                    return
-
-                if job.get("cancelled"):
-                    set_job(
-                        job_id,
-                        status="cancelled",
-                        message="Download cancelled.",
-                    )
-                    return
-
-                try:
-                    metadata = service.files().get(
-                        fileId=file_id,
-                        fields=(
-                            "id,name,mimeType,size,"
-                            "videoMediaMetadata(durationMillis)"
-                        ),
-                    ).execute()
-
-                    filename = safe_name(
-                        metadata.get(
-                            "name",
-                            f"video_{index}"
-                        )
-                    )
-
-                    original_filename = filename
-                    counter = 2
-
-                    while filename in used_names:
-                        base, ext = os.path.splitext(
-                            original_filename
-                        )
-                        filename = (
-                            f"{base} ({counter}){ext}"
-                        )
-                        counter += 1
-
-                    used_names.add(filename)
-
-                    local_path = os.path.join(
-                        temp_dir,
-                        f"file_{index}"
-                    )
-
-                    set_job(
-                        job_id,
-                        message=(
-                            f"Downloading {filename}..."
-                        ),
-                    )
-
-                    download_drive_file(
-                        credentials,
-                        file_id,
-                        local_path,
-                    )
-
-                    archive.write(
-                        local_path,
-                        arcname=filename,
-                    )
-
-                    try:
-                        os.remove(local_path)
-                    except Exception:
-                        pass
-
-                    progress = int(
-                        index / total * 100
-                    )
-
-                    set_job(
-                        job_id,
-                        completed=index,
-                        progress=progress,
-                        message=(
-                            f"{index} / {total} files"
-                        ),
-                    )
-
-                except Exception as exc:
-                    set_job(
-                        job_id,
-                        status="error",
-                        error=(
-                            f"Could not download "
-                            f"file {index}: {exc}"
-                        ),
-                    )
-                    return
-
-        set_job(
-            job_id,
-            status="done",
-            progress=100,
-            completed=total,
-            message="ZIP ready!",
-            zip_path=zip_path,
-            zip_path_object=store_artifact(
-                job_id, zip_path, "DriveBatch.zip"
-            ),
-        )
+        return Response(stream_with_context(generate()), status=drive_res.status_code, headers=response_headers)
 
     except Exception as exc:
-        set_job(
-            job_id,
-            status="error",
-            error=str(exc),
-        )
+        return jsonify({"error": str(exc)}), 500
 
 
-def compress_worker(
-    job_id,
-    file_ids,
-    credentials,
-    quality,
-):
-    temp_dir = tempfile.mkdtemp(
-        prefix="drivebatch_compress_"
-    )
-
-    set_compress_job(job_id, temp_dir=temp_dir)
-
-    try:
-        total = len(file_ids)
-
-        set_compress_job(
-            job_id,
-            status="running",
-            total=total,
-            completed=0,
-            progress=0,
-            message="Starting compression...",
-        )
-
-        output_files = [None] * total
-        workers = 1
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {
-                executor.submit(
-                    compress_one_video,
-                    job_id,
-                    file_id,
-                    credentials,
-                    quality,
-                    index,
-                    total,
-                    temp_dir,
-                ): index
-                for index, file_id in enumerate(file_ids, start=1)
-            }
-            for future in as_completed(futures):
-                index = futures[future]
-                try:
-                    _, output_path = future.result()
-                    output_files[index - 1] = output_path
-                    completed = sum(
-                        output_file is not None
-                        for output_file in output_files
-                    )
-                    set_compress_job(
-                        job_id,
-                        completed=completed,
-                        progress=max(
-                            get_compress_job(job_id).get("progress", 0),
-                            int(completed / total * 100),
-                        ),
-                        message=f"{completed} / {total} videos ready",
-                    )
-                except Exception as exc:
-                    set_compress_job(
-                        job_id,
-                        status="error",
-                        error=f"Could not compress video {index}: {exc}",
-                    )
-                    return
-
-        if any(output_file is None for output_file in output_files):
-            raise RuntimeError("One or more videos did not produce an output.")
-
-        is_batch = len(file_ids) > 1
-
-        if is_batch:
-            zip_path = os.path.join(
-                temp_dir,
-                "StreamSaver.zip"
-            )
-
-            with zipfile.ZipFile(
-                zip_path,
-                "w",
-                compression=zipfile.ZIP_DEFLATED,
-            ) as archive:
-
-                for output_file in output_files:
-                    archive.write(
-                        output_file,
-                        arcname=os.path.basename(output_file),
-                    )
-
-            set_compress_job(
-                job_id,
-                status="done",
-                progress=100,
-                completed=total,
-                message="Compression ready!",
-                zip_path=zip_path,
-                zip_path_object=store_artifact(
-                    job_id, zip_path, "StreamSaver.zip"
-                ),
-                temp_dir=temp_dir,
-            )
-        else:
-            set_compress_job(
-                job_id,
-                status="done",
-                progress=100,
-                completed=total,
-                message="Compression ready!",
-                file_path=output_files[0] if output_files else None,
-                file_path_object=(
-                    store_artifact(
-                        job_id,
-                        output_files[0],
-                        os.path.basename(output_files[0]),
-                    )
-                    if output_files
-                    else None
-                ),
-                temp_dir=temp_dir,
-            )
-
-    except Exception as exc:
-        set_compress_job(
-            job_id,
-            status="error",
-            error=str(exc),
-        )
-
-
+# ZIP BATCH ENDPOINTS
 @app.route("/api/download/start", methods=["POST"])
-def start_download():
-    try:
-        credentials = None
-        if not GOOGLE_API_KEY:
-            return jsonify({
-                "error": "Public Google Drive access is not configured."
-            }), 401
+def start_zip_download():
+    data = request.get_json() or {}
+    file_ids = [str(fid) for fid in data.get("file_ids", []) if str(fid).strip()]
 
-        data = request.get_json(
-            silent=True
-        ) or {}
+    if not file_ids:
+        return jsonify({"error": "No files selected."}), 400
 
-        file_ids = data.get(
-            "file_ids",
-            data.get("ids", [])
-        )
-        if not file_ids and data.get("file_id"):
-            file_ids = [data["file_id"]]
+    job_id = uuid.uuid4().hex
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "status": "queued",
+            "total": len(file_ids),
+            "completed": 0,
+            "progress": 0,
+            "message": "Starting ZIP creation...",
+            "created_at": time.time(),
+        }
 
-        if not isinstance(file_ids, list):
-            return jsonify({
-                "error": "file_ids must be a list."
-            }), 400
-
-        file_ids = [
-            str(file_id)
-            for file_id in file_ids
-            if str(file_id).strip()
-        ]
-
-        if not file_ids:
-            return jsonify({
-                "error": "No videos were selected."
-            }), 400
-
-        if len(file_ids) > 100:
-            return jsonify({
-                "error": "You can download up to 100 videos at once."
-            }), 400
-
-        job_id = uuid.uuid4().hex
-
-        with DOWNLOAD_LOCK:
-            DOWNLOAD_JOBS[job_id] = {
-                "status": "queued",
-                "quality": "original",
-                "total": len(file_ids),
-                "completed": 0,
-                "progress": 0,
-                "message": "Starting ZIP...",
-                "error": None,
-                "cancelled": False,
-                "zip_path": None,
-                "temp_dir": None,
-                "created_at": time.time(),
-            }
-
-        worker = threading.Thread(
-            target=zip_worker,
-            args=(
-                job_id,
-                file_ids,
-                credentials,
-            ),
-            daemon=True,
-        )
-
-        worker.start()
-
-        return jsonify({
-            "success": True,
-            "job_id": job_id,
-        })
-
-    except Exception as exc:
-        return jsonify({
-            "error": str(exc)
-        }), 500
+    threading.Thread(target=zip_worker, args=(job_id, file_ids, None), daemon=True).start()
+    return jsonify({"success": True, "job_id": job_id})
 
 
-@app.route(
-    "/api/download/status/<job_id>"
-)
-def download_status(job_id):
+@app.route("/api/download/status/<job_id>")
+def zip_status(job_id):
     job = get_job(job_id)
-
     if not job:
-        return jsonify({
-            "error": "Download job not found."
-        }), 404
-
-    response = {
-        "status": job.get("status"),
-        "quality": job.get("quality"),
-        "total": job.get("total", 0),
-        "completed": job.get("completed", 0),
-        "progress": job.get("progress", 0),
-        "message": job.get("message"),
-    }
-
-    if job.get("error"):
-        response["error"] = job["error"]
-
-    if job.get("status") == "done":
-        response["ready"] = True
-
-    return jsonify(response)
+        return jsonify({"error": "Job not found."}), 404
+    return jsonify(job)
 
 
-@app.route(
-    "/api/download/file/<job_id>"
-)
-def download_zip(job_id):
+@app.route("/api/download/file/<job_id>")
+def zip_file(job_id):
     job = get_job(job_id)
+    if not job or job.get("status") != "done" or not job.get("zip_path"):
+        return jsonify({"error": "File not ready."}), 404
 
-    if not job:
-        return jsonify({
-            "error": "Download job not found."
-        }), 404
-
-    if job.get("status") != "done":
-        return jsonify({
-            "error": "ZIP is not ready yet."
-        }), 409
-
-    path, temporary = materialize_artifact(job, "zip_path", ".zip")
-
-    if not path:
-        return jsonify({
-            "error": "ZIP file is no longer available."
-        }), 404
-    try:
-        return send_file(
-            path,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name="DriveBatch.zip",
-            max_age=0,
-        )
-    finally:
-        if temporary:
-            threading.Timer(
-                60,
-                lambda: os.path.exists(path) and os.remove(path),
-            ).start()
+    return send_file(job["zip_path"], mimetype="application/zip", as_attachment=True, download_name="DriveBatch.zip")
 
 
-@app.route(
-    "/api/download/cancel/<job_id>",
-    methods=["POST"]
-)
-def cancel_download(job_id):
-    job = get_job(job_id)
-
-    if not job:
-        return jsonify({
-            "error": "Download job not found."
-        }), 404
-
-    set_job(
-        job_id,
-        cancelled=True,
-        status="cancelled",
-        message="Download cancelled.",
-    )
-
-    return jsonify({
-        "success": True
-    })
+@app.route("/api/download/cancel/<job_id>", methods=["POST"])
+def zip_cancel(job_id):
+    set_job(job_id, cancelled=True, status="cancelled")
+    return jsonify({"success": True})
 
 
+# STREAM SAVER / COMPRESSION ENDPOINTS
 @app.route("/api/variants/start", methods=["POST"])
 @app.route("/api/compress/start", methods=["POST"])
 def start_compress():
-    try:
-        credentials = None
-        if not GOOGLE_API_KEY:
-            return jsonify({
-                "error": "Public Google Drive access is not configured."
-            }), 401
+    data = request.get_json() or {}
+    file_ids = [str(fid) for fid in data.get("file_ids", []) if str(fid).strip()]
+    quality = data.get("quality", "720p")
 
-        data = request.get_json(
-            silent=True
-        ) or {}
+    if not file_ids:
+        return jsonify({"error": "No videos selected."}), 400
 
-        file_ids = data.get(
-            "file_ids",
-            data.get("ids", [])
-        )
-        if not file_ids and data.get("file_id"):
-            file_ids = [data["file_id"]]
-
-        quality = data.get("quality", "720p")
-
-        if quality not in ["360p", "480p", "720p", "1080p"]:
-            return jsonify({
-                "error": "Invalid quality. Choose 360p, 480p, 720p, or 1080p."
-            }), 400
-
-        if not isinstance(file_ids, list):
-            return jsonify({
-                "error": "file_ids must be a list."
-            }), 400
-
-        file_ids = [
-            str(file_id)
-            for file_id in file_ids
-            if str(file_id).strip()
-        ]
-
-        if not file_ids:
-            return jsonify({
-                "error": "No videos were selected."
-            }), 400
-
-        if len(file_ids) > 100:
-            return jsonify({
-                "error": "You can compress up to 100 videos at once."
-            }), 400
-
-        job_id = uuid.uuid4().hex
-
-        with COMPRESS_LOCK:
-            COMPRESS_JOBS[job_id] = {
-                "status": "queued",
-                "total": len(file_ids),
-                "completed": 0,
-                "progress": 0,
-                "message": "Starting compression...",
-                "error": None,
-                "cancelled": False,
-                "file_path": None,
-                "zip_path": None,
-                "temp_dir": None,
-                "created_at": time.time(),
-            }
-
-        worker = threading.Thread(
-            target=compress_worker,
-            args=(
-                job_id,
-                file_ids,
-                credentials,
-                quality,
-            ),
-            daemon=True,
-        )
-
-        worker.start()
-
-        response = {
-            "success": True,
-            "job_id": job_id,
-            "is_batch": len(file_ids) > 1,
+    job_id = uuid.uuid4().hex
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "status": "queued",
             "quality": quality,
+            "total": len(file_ids),
+            "completed": 0,
+            "progress": 0,
+            "message": "Starting compression...",
+            "created_at": time.time(),
         }
-        if len(file_ids) == 1:
-            response["status_url"] = (
-                f"/api/variants/status/{job_id}"
-            )
-            response["download_url"] = (
-                f"/api/variants/download/{job_id}"
-            )
 
-        return jsonify(response)
-
-    except Exception as exc:
-        return jsonify({
-            "error": str(exc)
-        }), 500
+    threading.Thread(target=compress_worker, args=(job_id, file_ids, None, quality), daemon=True).start()
+    return jsonify({"success": True, "job_id": job_id})
 
 
 @app.route("/api/variants/status/<job_id>")
 @app.route("/api/compress/status/<job_id>")
 def compress_status(job_id):
-    job = get_compress_job(job_id)
-
+    job = get_job(job_id)
     if not job:
-        return jsonify({
-            "error": "Compression job not found."
-        }), 404
-
-    response = {
-        "status": job.get("status"),
-        "total": job.get("total", 0),
-        "completed": job.get("completed", 0),
-        "progress": job.get("progress", 0),
-        "message": job.get("message"),
-    }
-
-    if job.get("error"):
-        response["error"] = job["error"]
-
-    if job.get("status") == "done":
-        response["ready"] = True
-        if job.get("file_path"):
-            response["download_url"] = (
-                f"/api/variants/download/{job_id}"
-            )
-
-    return jsonify(response)
+        return jsonify({"error": "Job not found."}), 404
+    return jsonify(job)
 
 
-@app.route(
-    "/api/variants/cancel/<job_id>",
-    methods=["POST"],
-)
-@app.route(
-    "/api/compress/cancel/<job_id>",
-    methods=["POST"],
-)
-def cancel_compress(job_id):
-    job = get_compress_job(job_id)
-
-    if not job:
-        return jsonify({
-            "error": "Compression job not found."
-        }), 404
-
-    set_compress_job(
-        job_id,
-        cancelled=True,
-        status="cancelled",
-        message="Compression cancelled.",
-    )
-
-    return jsonify({"success": True})
-
-
-def stream_local_file(path, filename, mimetype):
-    file_size = os.path.getsize(path)
-    range_header = request.headers.get("Range")
-    chunk_number = request.args.get("chunk")
-    chunk_size = 25 * 1024 * 1024
-    start = 0
-    end = file_size - 1
-    status = 200
-
-    if not range_header and chunk_number is not None:
-        try:
-            chunk_index = int(chunk_number)
-        except ValueError:
-            chunk_index = -1
-
-        if chunk_index < 0:
-            return Response(status=416)
-
-        start = chunk_index * chunk_size
-        end = min(start + chunk_size - 1, file_size - 1)
-        if start >= file_size:
-            return Response(
-                status=416,
-                headers={"Content-Range": f"bytes */{file_size}"},
-            )
-        status = 206
-
-    if range_header:
-        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
-        if not match:
-            return Response(
-                status=416,
-                headers={"Content-Range": f"bytes */{file_size}"},
-            )
-
-        requested_start, requested_end = match.groups()
-        if requested_start:
-            start = int(requested_start)
-            if requested_end:
-                end = int(requested_end)
-        elif requested_end:
-            length = int(requested_end)
-            start = max(file_size - length, 0)
-
-        if start >= file_size or start > end:
-            return Response(
-                status=416,
-                headers={"Content-Range": f"bytes */{file_size}"},
-            )
-
-        end = min(end, file_size - 1)
-        status = 206
-
-    content_length = end - start + 1
-
-    def generate():
-        with open(path, "rb") as source:
-            source.seek(start)
-            remaining = content_length
-            while remaining:
-                chunk = source.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(content_length),
-        "Content-Disposition": (
-            f'attachment; filename="{safe_name(filename)}"'
-        ),
-        "Cache-Control": "private, max-age=3600",
-    }
-    if status == 206:
-        headers["Content-Range"] = (
-            f"bytes {start}-{end}/{file_size}"
-        )
-
-    return Response(
-        stream_with_context(generate()),
-        status=status,
-        mimetype=mimetype,
-        headers=headers,
-    )
-
-
+@app.route("/api/variants/file/<job_id>")
 @app.route("/api/variants/download/<job_id>")
 @app.route("/api/compress/file/<job_id>")
 def compress_file(job_id):
-    job = get_compress_job(job_id)
+    job = get_job(job_id)
+    if not job or job.get("status") != "done":
+        return jsonify({"error": "File not ready."}), 404
 
-    if not job:
-        return jsonify({
-            "error": "Compression job not found."
-        }), 404
+    path = job.get("zip_path") or job.get("file_path")
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "File missing."}), 404
 
-    if job.get("status") != "done":
-        return jsonify({
-            "error": "Compression not ready yet."
-        }), 409
+    mimetype = "application/zip" if job.get("zip_path") else "video/mp4"
+    name = os.path.basename(path)
 
-    zip_path, zip_temporary = materialize_artifact(
-        job, "zip_path", ".zip"
-    )
-    file_path, file_temporary = materialize_artifact(
-        job, "file_path", ".mp4"
-    )
-
-    if zip_path:
-        response = send_file(
-            zip_path,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name="StreamSaver.zip",
-            max_age=0,
-        )
-        if zip_temporary:
-            threading.Timer(
-                60,
-                lambda: os.path.exists(zip_path) and os.remove(zip_path),
-            ).start()
-        return response
-    elif file_path:
-        response = stream_local_file(
-            file_path,
-            os.path.basename(file_path),
-            "video/mp4",
-        )
-        if file_temporary:
-            threading.Timer(
-                60,
-                lambda: os.path.exists(file_path) and os.remove(file_path),
-            ).start()
-        return response
-    else:
-        return jsonify({
-            "error": "File no longer available."
-        }), 404
+    return send_file(path, mimetype=mimetype, as_attachment=True, download_name=name)
 
 
-def stream_drive_file(file_id, as_attachment=False):
-    if not GOOGLE_API_KEY:
-        return jsonify({
-            "error": "Public Google Drive access is not configured."
-        }), 401
-
-    drive_session = requests.Session()
-
-    meta_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?fields=name,mimeType,size"
-    request_params = {"key": GOOGLE_API_KEY}
-    meta_res = drive_session.get(meta_url, params=request_params)
-
-    if meta_res.status_code != 200:
-        return jsonify({
-            "error": "Could not retrieve video details from Google Drive."
-        }), meta_res.status_code
-
-    meta_data = meta_res.json()
-    filename = safe_name(meta_data.get("name", "video"))
-
-    media_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-    req_headers = {}
-
-    range_header = request.headers.get("Range")
-    if range_header:
-        req_headers["Range"] = range_header
-
-    drive_res = drive_session.get(
-        media_url,
-        params=request_params,
-        headers=req_headers,
-        stream=True,
-        timeout=600,
-    )
-
-    if drive_res.status_code not in (200, 206):
-        return jsonify({
-            "error": f"Failed to download video stream (HTTP {drive_res.status_code})."
-        }), drive_res.status_code
-
-    headers = {}
-    for header in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]:
-        if header in drive_res.headers:
-            headers[header] = drive_res.headers[header]
-
-    if meta_data.get("mimeType"):
-        headers["Content-Type"] = meta_data["mimeType"]
-
-    if "Accept-Ranges" not in headers:
-        headers["Accept-Ranges"] = "bytes"
-
-    disposition = "attachment" if as_attachment else "inline"
-    headers["Content-Disposition"] = f'{disposition}; filename="{filename}"'
-
-    def generate():
-        for chunk in drive_res.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                yield chunk
-
-    return Response(
-        stream_with_context(generate()),
-        status=drive_res.status_code,
-        headers=headers,
-    )
-
-
-@app.route("/api/video/<file_id>")
-def download_video(file_id):
-    try:
-        return stream_drive_file(file_id, as_attachment=True)
-    except Exception as exc:
-        return jsonify({
-            "error": str(exc)
-        }), 500
-
-
-@app.route("/api/preview/<file_id>")
-def preview_video(file_id):
-    try:
-        return stream_drive_file(file_id, as_attachment=False)
-    except Exception as exc:
-        return jsonify({
-            "error": str(exc)
-        }), 500
+@app.route("/api/variants/cancel/<job_id>", methods=["POST"])
+@app.route("/api/compress/cancel/<job_id>", methods=["POST"])
+def compress_cancel(job_id):
+    set_job(job_id, cancelled=True, status="cancelled")
+    return jsonify({"success": True})
 
 
 @app.route("/healthz")
@@ -1578,116 +514,6 @@ def healthz():
     return jsonify({"ok": True})
 
 
-@app.errorhandler(404)
-def handle_404(error):
-    if request.path.startswith("/api/"):
-        return jsonify({
-            "error": "API endpoint not found."
-        }), 404
-
-    return error
-
-
-@app.errorhandler(500)
-def handle_500(error):
-    if request.path.startswith("/api/"):
-        return jsonify({
-            "error": "Server error."
-        }), 500
-
-    return error
-
-
-def cleanup_jobs():
-    while True:
-        time.sleep(1800)
-
-        now = time.time()
-
-        with DOWNLOAD_LOCK:
-            old_download_jobs = []
-
-            for job_id, job in DOWNLOAD_JOBS.items():
-                created = job.get(
-                    "created_at",
-                    now
-                )
-
-                if now - created > 3600:
-                    old_download_jobs.append(
-                        job_id
-                    )
-
-            for job_id in old_download_jobs:
-                job = DOWNLOAD_JOBS.pop(
-                    job_id,
-                    None
-                )
-
-                if job:
-                    temp_dir = job.get("temp_dir") or (
-                        os.path.dirname(job.get("zip_path"))
-                        if job.get("zip_path")
-                        else None
-                    )
-                    if temp_dir:
-                        try:
-                            shutil.rmtree(
-                                temp_dir,
-                                ignore_errors=True
-                            )
-                        except Exception:
-                            pass
-
-        with COMPRESS_LOCK:
-            old_compress_jobs = []
-
-            for job_id, job in COMPRESS_JOBS.items():
-                created = job.get(
-                    "created_at",
-                    now
-                )
-
-                if now - created > 3600:
-                    old_compress_jobs.append(
-                        job_id
-                    )
-
-            for job_id in old_compress_jobs:
-                job = COMPRESS_JOBS.pop(
-                    job_id,
-                    None
-                )
-
-                if job:
-                    temp_dir = job.get("temp_dir")
-                    if temp_dir:
-                        try:
-                            shutil.rmtree(
-                                temp_dir,
-                                ignore_errors=True
-                            )
-                        except Exception:
-                            pass
-
-
-def add_created_time():
-    with DOWNLOAD_LOCK:
-        for job in DOWNLOAD_JOBS.values():
-            job.setdefault(
-                "created_at",
-                time.time()
-            )
-
-
-cleanup_thread = threading.Thread(
-    target=cleanup_jobs,
-    daemon=True,
-)
-
-cleanup_thread.start()
-
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-    
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=os.environ.get("FLASK_ENV") != "production")
