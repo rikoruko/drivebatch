@@ -11,5 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 5000
-CMD exec gunicorn app:app --bind 0.0.0.0:5000 --workers 1 --threads 2 --timeout 3600
+EXPOSE 8080
+
+# Dynamically bind to the PORT environment variable provided by the host/platform
+CMD exec gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 3600
