@@ -8,24 +8,28 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-# API Key or Service Account credentials for public Google Drive scanning
-DRIVE_API_KEY = os.getenv("GOOGLE_DRIVE_API_KEY", "")
-
 def extract_folder_id(url):
     """Extract folder ID from a Google Drive URL."""
+    if not url:
+        return None
+    url = url.strip()
     match = re.search(r'folders/([a-zA-Z0-9_-]+)', url)
     if match:
         return match.group(1)
     match = re.search(r'id=([a-zA-Z0-9_-]+)', url)
     if match:
         return match.group(1)
+    # Fallback if raw ID is passed directly
+    if re.match(r'^[a-zA-Z0-9_-]+$', url):
+        return url
     return None
 
 def build_drive_service():
-    """Build public Google Drive API service using API key."""
-    if not DRIVE_API_KEY:
+    """Build public Google Drive API service using API key (checking multiple environment variable names)."""
+    api_key = os.getenv("GOOGLE_DRIVE_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+    if not api_key:
         raise ValueError("GOOGLE_DRIVE_API_KEY environment variable is not set.")
-    return build('drive', 'v3', developerKey=DRIVE_API_KEY)
+    return build('drive', 'v3', developerKey=api_key)
 
 def scan_drive_folder(folder_id, media_type="video"):
     """Recursively list files inside a public Google Drive folder."""
@@ -91,6 +95,14 @@ def scan_drive_folder(folder_id, media_type="video"):
 def index():
     return render_template("index.html")
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
+
 @app.route("/api/scan", methods=["POST"])
 def scan():
     data = request.get_json() or {}
@@ -116,4 +128,5 @@ def auth_status():
     return jsonify({"connected": True})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
