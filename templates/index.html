@@ -570,506 +570,202 @@
 
 
 <script>
-
-const $ = id =>
-  document.getElementById(id);
+const $ = id => document.getElementById(id);
 
 let videos = [];
-
 let selected = new Set();
-
 let currentVideo = null;
-
+let currentVideoId = null;
 let currentJob = null;
-
 let jobFileUrl = null;
-
 let compressJobId = null;
-
 let compressIsBatch = false;
-
 let compressQuality = "720p";
-
 let mediaType = "video";
 
-const driveUrl =
-  $("driveUrl");
-
-const results =
-  $("results");
-
-const videoList =
-  $("videoList");
-
-const downloadBar =
-  $("downloadBar");
+const driveUrl = $("driveUrl");
+const results = $("results");
+const videoList = $("videoList");
+const downloadBar = $("downloadBar");
 
 /* -------------------------
    FILE SIZE
 ------------------------- */
-
 function bytes(n) {
-
   n = Number(n || 0);
+  if (!n) return "0 B";
 
-  if (!n) {
-    return "0 B";
-  }
-
-  const units = [
-    "B",
-    "KB",
-    "MB",
-    "GB",
-    "TB"
-  ];
-
+  const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
-
-  while (
-    n >= 1024 &&
-    i < units.length - 1
-  ) {
-
+  while (n >= 1024 && i < units.length - 1) {
     n /= 1024;
     i++;
-
   }
-
-  return (
-    n.toFixed(i ? 1 : 0)
-    + " "
-    + units[i]
-  );
-
+  return n.toFixed(i ? 1 : 0) + " " + units[i];
 }
-
 
 /* -------------------------
-   DRIVE URL
+   DRIVE URL VALIDATION
 ------------------------- */
-
 function validDrive(url) {
-
-  return /^https?:\/\/(?:www\.)?(?:drive\.google\.com|docs\.google\.com)\//i
-    .test(url);
-
+  return /^https?:\/\/(?:www\.)?(?:drive\.google\.com|docs\.google\.com)\//i.test(url);
 }
-
 
 /* -------------------------
    ESCAPE HTML
 ------------------------- */
-
 function escapeHtml(value) {
-
-  return String(value || "")
-    .replace(
-      /[&<>"']/g,
-      c => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;"
-      }[c])
-    );
-
+  return String(value || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  }[c]));
 }
-
 
 /* -------------------------
    SAFE JSON RESPONSE
 ------------------------- */
-
 async function readJson(response) {
-
-  const text =
-    await response.text();
-
+  const text = await response.text();
   if (!text) {
-
-    throw new Error(
-      "The server returned an empty response. HTTP "
-      + response.status
-    );
-
+    throw new Error(`The server returned an empty response. HTTP ${response.status}`);
   }
-
   try {
-
     return JSON.parse(text);
-
   } catch (error) {
-
-    console.error(
-      "Server response:",
-      text
-    );
-
-    throw new Error(
-      "Server returned an unexpected response. HTTP "
-      + response.status
-    );
-
+    console.error("Server response:", text);
+    throw new Error(`Server returned an unexpected response. HTTP ${response.status}`);
   }
-
 }
-
 
 /* -------------------------
-   SELECTION
+   SELECTION MANAGEMENT
 ------------------------- */
-
 function updateSelection() {
-
   let size = 0;
-
-
   videos.forEach(video => {
-
-    if (
-      selected.has(
-        String(video.id)
-      )
-    ) {
-
-      size += Number(
-        video.size || 0
-      );
-
+    if (selected.has(String(video.id))) {
+      size += Number(video.size || 0);
     }
-
   });
 
-  const itemLabel = mediaType === "image"
-    ? "image"
-    : mediaType === "audio" ? "track" : "video";
-
-
-  $("selectedCount")
-    .textContent =
-    `${selected.size} selected ${itemLabel}${selected.size === 1 ? "" : "s"}`;
-
-
-  $("selectedSize")
-    .textContent =
-    bytes(size);
-
-
-  downloadBar.classList.toggle(
-    "hidden",
-    selected.size === 0
-  );
-
+  const itemLabel = mediaType === "image" ? "image" : mediaType === "audio" ? "track" : "video";
+  $("selectedCount").textContent = `${selected.size} selected ${itemLabel}${selected.size === 1 ? "" : "s"}`;
+  $("selectedSize").textContent = bytes(size);
+  downloadBar.classList.toggle("hidden", selected.size === 0);
 }
-
 
 /* -------------------------
    RENDER VIDEOS
 ------------------------- */
-
 function renderVideos() {
-
-  const q =
-    $("search")
-      .value
-      .trim()
-      .toLowerCase();
-
-
-  const filtered =
-    videos.filter(video =>
-      String(
-        video.name || ""
-      )
-      .toLowerCase()
-      .includes(q)
-    );
-
-  const itemLabel = mediaType === "image"
-    ? "image"
-    : mediaType === "audio" ? "track" : "video";
-
+  const q = $("search").value.trim().toLowerCase();
+  const filtered = videos.filter(video => String(video.name || "").toLowerCase().includes(q));
+  const itemLabel = mediaType === "image" ? "image" : mediaType === "audio" ? "track" : "video";
 
   if (!filtered.length) {
-
-    videoList.innerHTML = `
-      <div class="card">
-        <p>No ${itemLabel}s found.</p>
-      </div>
-    `;
-
+    videoList.innerHTML = `<div class="card"><p>No ${itemLabel}s found.</p></div>`;
     updateSelection();
-
     return;
-
   }
 
-
-  videoList.innerHTML =
-    filtered.map(video => {
-
-      const id =
-        String(video.id);
-
-
-      return `
-        <article class="video-card">
-
-          <input
-            class="video-check"
-            type="checkbox"
-            ${selected.has(id) ? "checked" : ""}
-            onchange="toggleVideo('${escapeHtml(id)}')"
-          >
-
-
-          <button
-            class="preview-button"
-            type="button"
-            aria-label="Preview ${escapeHtml(video.name)}"
-            onclick="openPreview('${escapeHtml(id)}')"
-          >
-            <span aria-hidden="true">▶</span>
+  videoList.innerHTML = filtered.map(video => {
+    const id = String(video.id);
+    return `
+      <article class="video-card">
+        <input class="video-check" type="checkbox" ${selected.has(id) ? "checked" : ""} onchange="toggleVideo('${escapeHtml(id)}')">
+        <button class="preview-button" type="button" aria-label="Preview ${escapeHtml(video.name)}" onclick="openPreview('${escapeHtml(id)}')">
+          <span aria-hidden="true">▶</span>
+        </button>
+        <div class="video-info">
+          <h3>${escapeHtml(video.name)}</h3>
+          <p>${escapeHtml(video.path || "Google Drive")}</p>
+          <small>${bytes(video.size)}</small>
+        </div>
+        ${mediaType === "video" ? `
+          <button class="stream-saver-button" onclick="openStreamSaver('${escapeHtml(id)}')">
+            ⚡ Stream Saver
           </button>
-
-
-          <div class="video-info">
-
-            <h3>
-              ${escapeHtml(video.name)}
-            </h3>
-
-            <p>
-              ${escapeHtml(
-                video.path ||
-                "Google Drive"
-              )}
-            </p>
-
-            <small>
-              ${bytes(video.size)}
-            </small>
-
-          </div>
-
-
-          ${mediaType === "video" ? `
-            <button
-              class="stream-saver-button"
-              onclick="openStreamSaver('${escapeHtml(id)}')"
-            >
-              ⚡ Stream Saver
-            </button>
-          ` : ""}
-
-
-          <button
-            class="download-button"
-            onclick="downloadSingle('${escapeHtml(id)}')"
-          >
-            ↓
-          </button>
-
-        </article>
-      `;
-
-    }).join("");
-
+        ` : ""}
+        <button class="download-button" onclick="downloadSingle('${escapeHtml(id)}')">
+          ↓
+        </button>
+      </article>
+    `;
+  }).join("");
 
   updateSelection();
-
 }
-
-
-/* -------------------------
-   TOGGLE VIDEO
-------------------------- */
 
 function toggleVideo(id) {
-
   id = String(id);
-
-
-  if (
-    selected.has(id)
-  ) {
-
+  if (selected.has(id)) {
     selected.delete(id);
-
   } else {
-
     selected.add(id);
-
   }
-
-
   renderVideos();
-
 }
-
 
 /* -------------------------
    SCAN
 ------------------------- */
-
 async function scan() {
-
-  const url =
-    driveUrl.value.trim();
-
-
+  const url = driveUrl.value.trim();
   if (!validDrive(url)) {
-
-    alert(
-      "Please paste a valid Google Drive folder link."
-    );
-
+    alert("Please paste a valid Google Drive folder link.");
     return;
-
   }
-
 
   $("scanBtn").disabled = true;
-
-  $("scanBtn").textContent =
-    "Scanning...";
-
+  $("scanBtn").textContent = "Scanning...";
 
   try {
-
-    const response =
-      await fetch(
-        "/api/scan",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body: JSON.stringify({
-            url: url,
-            media_type: mediaType
-          })
-        }
-      );
-
-
-    const data =
-      await readJson(response);
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        data.error ||
-        "Scan failed."
-      );
-
-    }
-
-
-    videos =
-      data.videos ||
-      data.images ||
-      data.audio ||
-      [];
-
-
-    selected.clear();
-
-
-    const total =
-      videos.reduce(
-        (sum, video) =>
-          sum +
-          Number(
-            video.size || 0
-          ),
-        0
-      );
-
-    const label = mediaType === "image"
-      ? "images"
-      : mediaType === "audio" ? "tracks" : "videos";
-
-    $("resultsTitle").textContent =
-      mediaType === "image"
-        ? "Your images"
-        : mediaType === "audio" ? "Your music" : "Your videos";
-
-
-    $("folderStats")
-      .textContent =
-      `${videos.length} ${label} • ${bytes(total)}`;
-
-
-    results.classList.remove(
-      "hidden"
-    );
-
-
-    renderVideos();
-
-
-    results.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
+    const response = await fetch("/api/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url, media_type: mediaType })
     });
 
+    const data = await readJson(response);
+    if (!response.ok) {
+      throw new Error(data.error || "Scan failed.");
+    }
 
+    videos = data.videos || data.images || data.audio || [];
+    selected.clear();
+
+    const total = videos.reduce((sum, video) => sum + Number(video.size || 0), 0);
+    const label = mediaType === "image" ? "images" : mediaType === "audio" ? "tracks" : "videos";
+
+    $("resultsTitle").textContent = mediaType === "image" ? "Your images" : mediaType === "audio" ? "Your music" : "Your videos";
+    $("folderStats").textContent = `${videos.length} ${label} • ${bytes(total)}`;
+
+    results.classList.remove("hidden");
+    renderVideos();
+    results.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-
-    alert(
-      error.message ||
-      "Scan failed."
-    );
-
+    alert(error.message || "Scan failed.");
   }
 
-
   $("scanBtn").disabled = false;
-
-  $("scanBtn").textContent =
-    "Scan Folder";
-
+  $("scanBtn").textContent = "Scan Folder";
 }
-
 
 /* -------------------------
    PREVIEW
 ------------------------- */
-
 function openPreview(id) {
+  const video = videos.find(v => String(v.id) === String(id));
+  if (!video) return;
 
-  const video =
-    videos.find(
-      v =>
-        String(v.id) ===
-        String(id)
-    );
+  currentVideo = video;
+  currentVideoId = id;
 
-
-  if (!video) {
-    return;
-  }
-
-
-  currentVideo =
-    video;
-
-
-  $("previewTitle")
-    .textContent =
-    video.name ||
-    (mediaType === "image" ? "Image" : "Video");
-
-  const previewUrl =
-    "/api/preview/" +
-    encodeURIComponent(id);
+  $("previewTitle").textContent = video.name || (mediaType === "image" ? "Image" : "Video");
+  const previewUrl = "/api/preview/" + encodeURIComponent(id);
 
   const previewVideo = $("previewVideo");
   const previewAudio = $("previewAudio");
@@ -1082,540 +778,176 @@ function openPreview(id) {
   previewImage.classList.toggle("hidden", !isImage);
 
   if (isImage) {
-    previewVideo.pause();
-    previewVideo.removeAttribute("src");
-    previewVideo.load();
-    previewAudio.pause();
-    previewAudio.removeAttribute("src");
-    previewAudio.load();
-    previewImage.src = previewUrl;
-    previewImage.alt = video.name || "Image";
+    previewVideo.pause(); previewVideo.removeAttribute("src"); previewVideo.load();
+    previewAudio.pause(); previewAudio.removeAttribute("src"); previewAudio.load();
+    previewImage.src = previewUrl; previewImage.alt = video.name || "Image";
   } else if (isAudio) {
-    previewVideo.pause();
-    previewVideo.removeAttribute("src");
-    previewVideo.load();
+    previewVideo.pause(); previewVideo.removeAttribute("src"); previewVideo.load();
     previewImage.removeAttribute("src");
     previewAudio.src = previewUrl;
   } else {
-    previewAudio.pause();
-    previewAudio.removeAttribute("src");
-    previewAudio.load();
+    previewAudio.pause(); previewAudio.removeAttribute("src"); previewAudio.load();
     previewImage.removeAttribute("src");
     previewVideo.src = previewUrl;
   }
 
-
-  $("previewModal")
-    .classList.remove(
-      "hidden"
-    );
-
+  $("previewModal").classList.remove("hidden");
 }
-
-
-/* -------------------------
-   CLOSE PREVIEW
-------------------------- */
 
 function closePreview() {
-
-  const player =
-    $("previewVideo");
-
-
-  player.pause();
-
-  player.removeAttribute(
-    "src"
-  );
-
-  player.load();
+  const player = $("previewVideo");
+  player.pause(); player.removeAttribute("src"); player.load();
 
   const audio = $("previewAudio");
-  audio.pause();
-  audio.removeAttribute("src");
-  audio.load();
+  audio.pause(); audio.removeAttribute("src"); audio.load();
 
   $("previewImage").removeAttribute("src");
-
-
-  $("previewModal")
-    .classList.add(
-      "hidden"
-    );
-
+  $("previewModal").classList.add("hidden");
 }
-
 
 /* -------------------------
    SINGLE DOWNLOAD
 ------------------------- */
-
 function downloadSingle(id) {
-
-  const url =
-    "/api/video/" +
-    encodeURIComponent(id);
-
-
-  const link =
-    document.createElement("a");
-
-
-  link.href = url;
-  link.download = "";
-
-  document.body.appendChild(
-    link
-  );
-
-
-  link.click();
-
-
-  link.remove();
-
+  const url = "/api/video/" + encodeURIComponent(id);
+  window.location.assign(url);
 }
-
 
 /* -------------------------
-   STREAM SAVER
+   STREAM SAVER (COMPRESSION)
 ------------------------- */
-
 function openStreamSaver(id) {
+  const video = videos.find(v => String(v.id) === String(id));
+  if (!video) return;
 
-  const video =
-    videos.find(
-      v =>
-        String(v.id) ===
-        String(id)
-    );
-
-
-  if (!video) {
-    return;
-  }
-
-
-  currentVideo =
-    video;
-
-
+  currentVideo = video;
+  currentVideoId = id;
   compressIsBatch = false;
 
-
-  $("streamSaverModal")
-    .classList.remove(
-      "hidden"
-    );
-
+  $("streamSaverModal").classList.remove("hidden");
 }
-
 
 function closeStreamSaver() {
-
-  $("streamSaverModal")
-    .classList.add(
-      "hidden"
-    );
-
+  $("streamSaverModal").classList.add("hidden");
 }
 
-
 async function startCompression(quality) {
-
   compressQuality = quality;
-
-  $("streamSaverModal")
-    .classList.add(
-      "hidden"
-    );
-
-  $("compressProgressModal")
-    .classList.remove(
-      "hidden"
-    );
-
-  $("compressProgressText")
-    .textContent =
-    "Starting compression...";
-
-  $("compressProgressFill")
-    .style.width =
-    "0%";
-
+  $("streamSaverModal").classList.add("hidden");
+  $("compressProgressModal").classList.remove("hidden");
+  $("compressProgressText").textContent = "Starting compression...";
+  $("compressProgressFill").style.width = "0%";
   compressJobId = null;
 
-
-  const ids =
-    compressIsBatch
-      ? [...selected]
-      : [String(currentVideo.id)];
-
-
-  if (!ids.length) {
+  const ids = compressIsBatch ? [...selected] : [String(currentVideoId || (currentVideo ? currentVideo.id : ""))];
+  if (!ids.length || !ids[0]) {
+    alert("No video selected for compression.");
+    $("compressProgressModal").classList.add("hidden");
     return;
   }
 
-
   try {
-    const response = await fetch(
-      "/api/compress/start",
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
-
-        body: JSON.stringify({
-          file_ids: ids,
-          quality: quality,
-        })
-      }
-    );
+    const response = await fetch("/api/compress/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_ids: ids, quality: quality })
+    });
 
     const data = await readJson(response);
-
     if (!response.ok) {
-      throw new Error(
-        data.error ||
-        "Could not start compression."
-      );
+      throw new Error(data.error || "Could not start compression.");
     }
 
-    compressJobId =
-      data.job_id ||
-      data.jobId ||
-      data.id;
-
-
+    compressJobId = data.job_id || data.jobId || data.id;
     if (!compressJobId) {
-      throw new Error(
-        "The server did not return a compression job."
-      );
+      throw new Error("The server did not return a compression job.");
     }
 
     pollCompressJob();
-
   } catch (error) {
-
-    $("compressProgressModal")
-      .classList.add(
-        "hidden"
-      );
-
-    alert(
-      error.message ||
-      "Could not start compression."
-    );
-
+    $("compressProgressModal").classList.add("hidden");
+    alert(error.message || "Could not start compression.");
   }
-
 }
-
 
 async function pollCompressJob() {
-
-  if (!compressJobId) {
-    return;
-  }
-
+  if (!compressJobId) return;
 
   try {
-
-    const response =
-      await fetch(
-        "/api/compress/status/" +
-        encodeURIComponent(
-          compressJobId
-        ),
-        {
-          cache: "no-store"
-        }
-      );
-
-
-    const data =
-      await readJson(
-        response
-      );
-
+    const response = await fetch("/api/compress/status/" + encodeURIComponent(compressJobId), { cache: "no-store" });
+    const data = await readJson(response);
 
     if (!response.ok) {
-
-      throw new Error(
-        data.error ||
-        "Could not check compression progress."
-      );
-
+      throw new Error(data.error || "Could not check compression progress.");
     }
 
+    const progress = Number(data.progress || 0);
+    $("compressProgressFill").style.width = Math.max(0, Math.min(100, progress)) + "%";
+    $("compressProgressText").textContent = data.message || `${data.completed || 0} / ${data.total || 0} videos`;
 
-    const progress =
-      Number(
-        data.progress || 0
-      );
-
-
-    $("compressProgressFill")
-      .style.width =
-      Math.max(
-        0,
-        Math.min(
-          100,
-          progress
-        )
-      ) + "%";
-
-
-    $("compressProgressText")
-      .textContent =
-      data.message ||
-      `${data.completed || 0} / ${
-        data.total || 0
-      } videos`;
-
-
-    if (
-      data.status === "done" ||
-      data.status === "completed" ||
-      data.ready === true
-    ) {
-
+    if (data.status === "done" || data.status === "completed" || data.ready === true) {
       downloadCompressedFile();
-
       return;
-
     }
 
-
-    if (
-      data.status === "error" ||
-      data.status === "failed"
-    ) {
-
-      throw new Error(
-        data.error ||
-        "Compression failed."
-      );
-
+    if (data.status === "error" || data.status === "failed") {
+      throw new Error(data.error || "Compression failed.");
     }
 
-
-    if (
-      data.status === "cancelled"
-    ) {
-
-      $("compressProgressModal")
-        .classList.add(
-          "hidden"
-        );
-
+    if (data.status === "cancelled") {
+      $("compressProgressModal").classList.add("hidden");
       return;
-
     }
 
-
-    setTimeout(
-      pollCompressJob,
-      800
-    );
-
-
+    setTimeout(pollCompressJob, 800);
   } catch (error) {
-
-    $("compressProgressModal")
-      .classList.add(
-        "hidden"
-      );
-
-
-    alert(
-      error.message ||
-      "Could not check compression progress."
-    );
-
+    $("compressProgressModal").classList.add("hidden");
+    alert(error.message || "Could not check compression progress.");
   }
-
 }
-
 
 function downloadCompressedFile() {
-
-  if (!compressJobId) {
-    return;
-  }
-
-
-  const url =
-    "/api/compress/file/" +
-    encodeURIComponent(
-      compressJobId
-    );
-
-
-  // The job finishes from a polling callback, so a synthetic anchor click
-  // can be blocked by browsers as an unsolicited download. The endpoint
-  // already returns Content-Disposition: attachment, so navigate directly
-  // to let the browser handle the download.
+  if (!compressJobId) return;
+  const url = "/api/compress/file/" + encodeURIComponent(compressJobId);
   window.location.assign(url);
-
-  $("compressProgressModal")
-    .classList.add(
-      "hidden"
-    );
-
+  $("compressProgressModal").classList.add("hidden");
 }
 
-
 /* -------------------------
-   SCAN BUTTON
+   EVENT LISTENERS & BINDINGS
 ------------------------- */
+$("scanBtn").onclick = scan;
+driveUrl.addEventListener("keydown", event => { if (event.key === "Enter") scan(); });
+$("search").oninput = renderVideos;
 
-$("scanBtn").onclick =
-  scan;
+$("selectAll").onclick = () => {
+  videos.forEach(video => selected.add(String(video.id)));
+  renderVideos();
+};
 
+$("clearAll").onclick = () => {
+  selected.clear();
+  renderVideos();
+};
 
-driveUrl.addEventListener(
-  "keydown",
-  event => {
+$("closePreview").onclick = closePreview;
+$("previewDownload").onclick = () => {
+  if (currentVideoId) downloadSingle(currentVideoId);
+};
 
-    if (
-      event.key === "Enter"
-    ) {
+$("downloadSelected").onclick = () => {
+  if (!selected.size) return;
+  const label = mediaType === "image" ? "image" : "video";
+  $("downloadInfo").textContent = `${selected.size} ${label}${selected.size === 1 ? "" : "s"} selected.`;
+  $("downloadModal").classList.remove("hidden");
+};
 
-      scan();
-
-    }
-
-  }
-);
-
-
-/* -------------------------
-   SEARCH
-------------------------- */
-
-$("search").oninput =
-  renderVideos;
-
-
-/* -------------------------
-   SELECT ALL
-------------------------- */
-
-$("selectAll").onclick =
-  () => {
-
-    videos.forEach(
-      video =>
-        selected.add(
-          String(video.id)
-        )
-    );
-
-
-    renderVideos();
-
-  };
-
-
-/* -------------------------
-   CLEAR ALL
-------------------------- */
-
-$("clearAll").onclick =
-  () => {
-
-    selected.clear();
-
-    renderVideos();
-
-  };
-
-
-/* -------------------------
-   PREVIEW CLOSE
-------------------------- */
-
-$("closePreview").onclick =
-  closePreview;
-
-
-/* -------------------------
-   PREVIEW DOWNLOAD
-------------------------- */
-
-$("previewDownload").onclick =
-  () => {
-
-    if (currentVideo) {
-
-      downloadSingle(
-        currentVideo.id
-      );
-
-    }
-
-  };
-
-
-/* -------------------------
-   OPEN DOWNLOAD OPTIONS
-------------------------- */
-
-$("downloadSelected").onclick =
-  () => {
-
-    if (!selected.size) {
-      return;
-    }
-
-
-    const label = mediaType === "image" ? "image" : "video";
-
-    $("downloadInfo")
-      .textContent =
-      `${selected.size} ${label}${
-        selected.size === 1
-          ? ""
-          : "s"
-      } selected.`;
-
-
-    $("downloadModal")
-      .classList.remove(
-        "hidden"
-      );
-
-  };
-
-
-/* -------------------------
-   CLOSE DOWNLOAD OPTIONS
-------------------------- */
-
-$("closeDownload").onclick =
-  () => {
-
-    $("downloadModal")
-      .classList.add(
-        "hidden"
-      );
-
-  };
-
+$("closeDownload").onclick = () => $("downloadModal").classList.add("hidden");
 
 function applyMediaType(nextType) {
-  mediaType = ["video", "image", "audio"].includes(nextType)
-    ? nextType
-    : "video";
-
+  mediaType = ["video", "image", "audio"].includes(nextType) ? nextType : "video";
   document.querySelectorAll(".media-toggle-btn").forEach(button => {
-    const active = button.dataset.mediaType === mediaType;
-    button.classList.toggle("active", active);
+    button.classList.toggle("active", button.dataset.mediaType === mediaType);
   });
 
   $("search").value = "";
@@ -1626,686 +958,143 @@ function applyMediaType(nextType) {
   $("batchStreamSaver").classList.toggle("hidden", mediaType !== "video");
 }
 
-
-/* -------------------------
-   MEDIA TYPE TOGGLE
-------------------------- */
-
 document.querySelectorAll(".media-toggle-btn").forEach(button => {
-  button.onclick = () => {
-    applyMediaType(button.dataset.mediaType || "video");
-  };
+  button.onclick = () => applyMediaType(button.dataset.mediaType || "video");
 });
 
-
-/* -------------------------
-   INDIVIDUAL DOWNLOADS
-------------------------- */
-
-$("individualBtn").onclick =
-  async () => {
-
-    $("downloadModal")
-      .classList.add(
-        "hidden"
-      );
-
-
-    const ids =
-      [...selected];
-
-
-    for (
-      const id of ids
-    ) {
-
-      downloadSingle(id);
-
-
-      await new Promise(
-        resolve =>
-          setTimeout(
-            resolve,
-            1800
-          )
-      );
-
-    }
-
-  };
-
-
-/* -------------------------
-   START ZIP
-------------------------- */
-
-$("zipBtn").onclick =
-  async () => {
-
-    $("downloadModal")
-      .classList.add(
-        "hidden"
-      );
-
-
-    $("progressModal")
-      .classList.remove(
-        "hidden"
-      );
-
-
-    $("progressText")
-      .textContent =
-      "Starting ZIP...";
-
-
-    $("progressFill")
-      .style.width =
-      "0%";
-
-
-    currentJob = null;
-
-    jobFileUrl = null;
-
-
-    try {
-
-      const ids =
-        [...selected];
-
-
-      if (!ids.length) {
-
-        throw new Error(
-          "No videos were selected."
-        );
-
-      }
-
-
-      const response =
-        await fetch(
-          "/api/download/start",
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type":
-                "application/json"
-            },
-
-            body: JSON.stringify({
-              file_ids: ids
-            })
-          }
-        );
-
-
-      const data =
-        await readJson(
-          response
-        );
-
-
-      if (!response.ok) {
-
-        throw new Error(
-          data.error ||
-          "Could not start ZIP download."
-        );
-
-      }
-
-
-      currentJob =
-        data.job_id ||
-        data.jobId ||
-        data.id;
-
-
-      if (!currentJob) {
-
-        throw new Error(
-          "The server did not return a download job."
-        );
-
-      }
-
-
-      pollJob();
-
-
-    } catch (error) {
-
-      $("progressModal")
-        .classList.add(
-          "hidden"
-        );
-
-
-      alert(
-        error.message ||
-        "Could not start ZIP download."
-      );
-
-    }
-
-  };
-
-
-/* -------------------------
-   ZIP PROGRESS
-------------------------- */
-
-async function pollJob() {
-
-  if (!currentJob) {
-    return;
+$("individualBtn").onclick = async () => {
+  $("downloadModal").classList.add("hidden");
+  const ids = [...selected];
+  for (const id of ids) {
+    downloadSingle(id);
+    await new Promise(resolve => setTimeout(resolve, 1800));
   }
+};
 
+/* -------------------------
+   ZIP START & POLL
+------------------------- */
+$("zipBtn").onclick = async () => {
+  $("downloadModal").classList.add("hidden");
+  $("progressModal").classList.remove("hidden");
+  $("progressText").textContent = "Starting ZIP...";
+  $("progressFill").style.width = "0%";
+  currentJob = null;
+  jobFileUrl = null;
 
   try {
+    const ids = [...selected];
+    if (!ids.length) throw new Error("No videos were selected.");
 
-    const response =
-      await fetch(
-        "/api/download/status/" +
-        encodeURIComponent(
-          currentJob
-        ),
-        {
-          cache: "no-store"
-        }
-      );
+    const response = await fetch("/api/download/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_ids: ids })
+    });
 
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.error || "Could not start ZIP download.");
 
-    const data =
-      await readJson(
-        response
-      );
+    currentJob = data.job_id || data.jobId || data.id;
+    if (!currentJob) throw new Error("The server did not return a download job.");
 
-
-    if (!response.ok) {
-
-      throw new Error(
-        data.error ||
-        "Could not check ZIP progress."
-      );
-
-    }
-
-
-    const progress =
-      Number(
-        data.progress || 0
-      );
-
-
-    $("progressFill")
-      .style.width =
-      Math.max(
-        0,
-        Math.min(
-          100,
-          progress
-        )
-      ) + "%";
-
-
-    $("progressText")
-      .textContent =
-      data.message ||
-      `${data.completed || 0} / ${
-        data.total || 0
-      } videos`;
-
-
-    if (
-      data.status === "done" ||
-      data.status === "completed" ||
-      data.ready === true
-    ) {
-
-      jobFileUrl =
-        "/api/download/file/" +
-        encodeURIComponent(
-          currentJob
-        );
-
-
-      $("progressModal")
-        .classList.add(
-          "hidden"
-        );
-
-      $("successModal")
-        .classList.remove(
-          "hidden"
-        );
-
-
-      return;
-
-    }
-
-
-    if (
-      data.status === "error" ||
-      data.status === "failed"
-    ) {
-
-      throw new Error(
-        data.error ||
-        "ZIP creation failed."
-      );
-
-    }
-
-
-    if (
-      data.status === "cancelled"
-    ) {
-
-      $("progressModal")
-        .classList.add(
-          "hidden"
-        );
-
-      return;
-
-    }
-
-
-    setTimeout(
-      pollJob,
-      800
-    );
-
-
+    pollJob();
   } catch (error) {
-
-    $("progressModal")
-      .classList.add(
-        "hidden"
-      );
-
-
-    alert(
-      error.message ||
-      "Could not check ZIP progress."
-    );
-
+    $("progressModal").classList.add("hidden");
+    alert(error.message || "Could not start ZIP download.");
   }
+};
 
+async function pollJob() {
+  if (!currentJob) return;
+
+  try {
+    const response = await fetch("/api/download/status/" + encodeURIComponent(currentJob), { cache: "no-store" });
+    const data = await readJson(response);
+
+    if (!response.ok) throw new Error(data.error || "Could not check ZIP progress.");
+
+    const progress = Number(data.progress || 0);
+    $("progressFill").style.width = Math.max(0, Math.min(100, progress)) + "%";
+    $("progressText").textContent = data.message || `${data.completed || 0} / ${data.total || 0} videos`;
+
+    if (data.status === "done" || data.status === "completed" || data.ready === true) {
+      jobFileUrl = "/api/download/file/" + encodeURIComponent(currentJob);
+      $("progressModal").classList.add("hidden");
+      $("successModal").classList.remove("hidden");
+      return;
+    }
+
+    if (data.status === "error" || data.status === "failed") {
+      throw new Error(data.error || "ZIP creation failed.");
+    }
+
+    if (data.status === "cancelled") {
+      $("progressModal").classList.add("hidden");
+      return;
+    }
+
+    setTimeout(pollJob, 800);
+  } catch (error) {
+    $("progressModal").classList.add("hidden");
+    alert(error.message || "Could not check ZIP progress.");
+  }
 }
 
+$("successDownload").onclick = () => {
+  if (!jobFileUrl) return;
+  window.location.assign(jobFileUrl);
+};
 
-/* -------------------------
-   DOWNLOAD FINISHED ZIP
-------------------------- */
+$("successClose").onclick = () => $("successModal").classList.add("hidden");
 
-$("successDownload").onclick =
-  () => {
-
-    if (!jobFileUrl) {
-      return;
-    }
-
-
-    const link =
-      document.createElement("a");
-
-
-    link.href =
-      jobFileUrl;
-
-    link.download = "DriveBatch.zip";
-
-    document.body.appendChild(
-      link
-    );
-
-
-    link.click();
-
-
-    link.remove();
-
-  };
-
-
-/* -------------------------
-   CLOSE SUCCESS
-------------------------- */
-
-$("successClose").onclick =
-  () => {
-
-    $("successModal")
-      .classList.add(
-        "hidden"
-      );
-
-  };
-
-
-/* -------------------------
-   CANCEL ZIP
-------------------------- */
-
-$("cancelBtn").onclick =
-  async () => {
-
-    if (!currentJob) {
-
-      $("progressModal")
-        .classList.add(
-          "hidden"
-        );
-
-      return;
-
-    }
-
-
+$("cancelBtn").onclick = async () => {
+  if (currentJob) {
     try {
+      await fetch("/api/download/cancel/" + encodeURIComponent(currentJob), { method: "POST" });
+    } catch (e) { console.error(e); }
+  }
+  $("progressModal").classList.add("hidden");
+  currentJob = null;
+};
 
-      await fetch(
-        "/api/download/cancel/" +
-        encodeURIComponent(
-          currentJob
-        ),
-        {
-          method: "POST"
-        }
-      );
+$("batchStreamSaver").onclick = () => {
+  if (!selected.size || mediaType !== "video") return;
+  compressIsBatch = true;
+  $("streamSaverModal").classList.remove("hidden");
+};
 
-    } catch (error) {
-
-      console.error(
-        error
-      );
-
-    }
-
-
-    $("progressModal")
-      .classList.add(
-        "hidden"
-      );
-
-
-    currentJob =
-      null;
-
-  };
-
-
-/* -------------------------
-   BATCH STREAM SAVER
-------------------------- */
-
-$("batchStreamSaver").onclick =
-  () => {
-
-    if (!selected.size || mediaType !== "video") {
-      return;
-    }
-
-
-    compressIsBatch = true;
-
-
-    $("streamSaverModal")
-      .classList.remove(
-        "hidden"
-      );
-
-  };
-
-
-/* -------------------------
-   QUALITY SELECTION
-------------------------- */
-
-document.querySelectorAll(
-  ".quality-btn"
-).forEach(button => {
-
-  button.onclick = () => {
-
-    const quality =
-      button.getAttribute(
-        "data-quality"
-      );
-
-
-    startCompression(quality);
-
-  };
-
+document.querySelectorAll(".quality-btn").forEach(button => {
+  button.onclick = () => startCompression(button.getAttribute("data-quality"));
 });
 
+$("closeStreamSaver").onclick = closeStreamSaver;
 
-/* -------------------------
-   STREAM SAVER MODAL CLOSE
-------------------------- */
-
-$("closeStreamSaver").onclick =
-  closeStreamSaver;
-
-
-/* -------------------------
-   COMPRESSION CANCEL
-------------------------- */
-
-$("compressCancelBtn").onclick =
-  async () => {
-
-    if (!compressJobId) {
-
-      $("compressProgressModal")
-        .classList.add(
-          "hidden"
-        );
-
-      return;
-
-    }
-
-
+$("compressCancelBtn").onclick = async () => {
+  if (compressJobId) {
     try {
-
-      await fetch(
-        "/api/compress/cancel/" +
-        encodeURIComponent(
-          compressJobId
-        ),
-        {
-          method: "POST"
-        }
-      );
-
-    } catch (error) {
-
-      console.error(
-        error
-      );
-
-    }
-
-
-    $("compressProgressModal")
-      .classList.add(
-        "hidden"
-      );
-
-
-    compressJobId =
-      null;
-
-  };
-
-
-/* -------------------------
-   MENU
-------------------------- */
-
-$("menuBtn").onclick =
-  () => {
-
-    $("menu")
-      .classList.toggle(
-        "open"
-      );
-
-  };
-
-
-/* -------------------------
-   ESCAPE KEY
-------------------------- */
-
-document.addEventListener(
-  "keydown",
-  event => {
-
-    if (
-      event.key === "Escape"
-    ) {
-
-      closePreview();
-
-      $("downloadModal")
-        .classList.add(
-          "hidden"
-        );
-
-      $("progressModal")
-        .classList.add(
-          "hidden"
-        );
-
-      $("successModal")
-        .classList.add(
-          "hidden"
-        );
-
-      closeStreamSaver();
-
-      $("compressProgressModal")
-        .classList.add(
-          "hidden"
-        );
-
-    }
-
+      await fetch("/api/compress/cancel/" + encodeURIComponent(compressJobId), { method: "POST" });
+    } catch (e) { console.error(e); }
   }
-);
+  $("compressProgressModal").classList.add("hidden");
+  compressJobId = null;
+};
 
+$("menuBtn").onclick = () => $("menu").classList.toggle("open");
 
-/* -------------------------
-   MODAL BACKDROPS
-------------------------- */
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    closePreview();
+    $("downloadModal").classList.add("hidden");
+    $("successModal").classList.add("hidden");
+    closeStreamSaver();
+  }
+});
 
-$("previewModal")
-  .addEventListener(
-    "click",
-    event => {
-
-      if (
-        event.target ===
-        $("previewModal")
-      ) {
-
-        closePreview();
-
-      }
-
-    }
-  );
-
-
-$("downloadModal")
-  .addEventListener(
-    "click",
-    event => {
-
-      if (
-        event.target ===
-        $("downloadModal")
-      ) {
-
-        $("downloadModal")
-          .classList.add(
-            "hidden"
-          );
-
-      }
-
-    }
-  );
-
-
-$("successModal")
-  .addEventListener(
-    "click",
-    event => {
-
-      if (
-        event.target ===
-        $("successModal")
-      ) {
-
-        $("successModal")
-          .classList.add(
-            "hidden"
-          );
-
-      }
-
-    }
-  );
-
-
-$("streamSaverModal")
-  .addEventListener(
-    "click",
-    event => {
-
-      if (
-        event.target ===
-        $("streamSaverModal")
-      ) {
-
-        closeStreamSaver();
-
-      }
-
-    }
-  );
-
-
-$("compressProgressModal")
-  .addEventListener(
-    "click",
-    event => {
-
-      if (
-        event.target ===
-        $("compressProgressModal")
-      ) {
-
-        $("compressProgressModal")
-          .classList.add(
-            "hidden"
-          );
-
-      }
-
-    }
-  );
-
+$("previewModal").addEventListener("click", event => { if (event.target === $("previewModal")) closePreview(); });
+$("downloadModal").addEventListener("click", event => { if (event.target === $("downloadModal")) $("downloadModal").classList.add("hidden"); });
+$("successModal").addEventListener("click", event => { if (event.target === $("successModal")) $("successModal").classList.add("hidden"); });
+$("streamSaverModal").addEventListener("click", event => { if (event.target === $("streamSaverModal")) closeStreamSaver(); });
 
 async function updateDriveStatus() {
   try {
@@ -2321,7 +1110,6 @@ async function updateDriveStatus() {
 
 updateDriveStatus();
 </script>
-
 
 </body>
 </html>
