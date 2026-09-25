@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+import yt_dlp
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -77,7 +78,6 @@ def scan_drive_folder(folder_id, media_type="video"):
 
             for file in res.get('files', []):
                 file_id = file['id']
-                # Route direct_url through the Flask proxy to prevent browser CORS / NetworkErrors
                 direct_url = f"/api/download/{file_id}"
                 
                 items.append({
@@ -99,11 +99,11 @@ def scan_drive_folder(folder_id, media_type="video"):
 def index():
     return render_template("index.html")
 
-@app.route("/")
+@app.route("/privacy")
 def privacy():
     return render_template("privacy.html")
 
-@app.route("/")
+@app.route("/terms")
 def terms():
     return render_template("terms.html")
 
@@ -129,36 +129,64 @@ def scan():
 
 @app.route("/api/download/<file_id>")
 def proxy_download(file_id):
-    """Proxy Google Drive pre-processed video stream variants (itags) or raw downloads through Flask."""
-    quality = request.args.get("cpn")
-    
-    # Map quality selections to Google Drive web player stream itags
-    itag_map = {
-        "1080p": "37",
-        "720p": "22",
-        "360p": "18"
-    }
-    
-    itag = itag_map.get(quality)
+    """Extracts pre-transcoded Google web stream variants using yt-dlp for instant compressed downloads."""
+    quality = request.args.get("cpn") or request.args.get("quality")
+    drive_page_url = f"https://drive.google.com/file/d/{file_id}/view"
 
-    if not itag or quality == "original":
-        # Fallback to original raw master download
-        target_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
-    else:
-        # Target Google Drive's pre-rendered web player stream variant endpoint
-        target_url = f"https://drive.google.com/uc?export=view&id={file_id}&itag={itag}"
+    target_format = None
+    stream_url = None
 
     try:
-        req = requests.get(target_url, stream=True, allow_redirects=True)
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': False,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(drive_page_url, download=False)
+            formats = info.get('formats', [])
+
+        # Parse requested quality height (e.g. "1080p" -> 1080)
+        target_height = None
+        if quality and quality != "original":
+            match = re.search(r'(\d+)', quality)
+            if match:
+                target_height = int(match.group(1))
+
+        if target_height:
+            # Find matching resolution format with a valid CDN URL
+            matching = [f for f in formats if f.get('height') == target_height and f.get('url')]
+            if matching:
+                target_format = matching[0]
+
+        # If no specific resolution match found, pick the standard web stream or fallback
+        if not target_format and formats:
+            target_format = formats[-1]
+
+        if target_format and target_format.get('url'):
+            stream_url = target_format['url']
+
+    except Exception:
+        pass  # Fallback gracefully if yt-dlp extraction fails
+
+    # Absolute fallback to standard Drive export link if manifest lookup fails
+    if not stream_url:
+        stream_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+
+    try:
+        upstream_resp = requests.get(stream_url, stream=True, allow_redirects=True)
         
         def generate():
-            for chunk in req.iter_content(chunk_size=8192):
+            for chunk in upstream_resp.iter_content(chunk_size=8192):
                 if chunk:
                     yield chunk
                     
+        ext = target_format.get('ext', 'mp4') if target_format else 'mp4'
+        output_filename = f"video_{file_id}_{quality or 'original'}.{ext}"
+        
         headers = {
-            "Content-Type": req.headers.get("Content-Type", "video/mp4"),
-            "Content-Disposition": req.headers.get("Content-Disposition", f"attachment; filename=video_{file_id}_{quality or 'original'}.mp4")
+            "Content-Type": upstream_resp.headers.get("Content-Type", "video/mp4"),
+            "Content-Disposition": f"attachment; filename={output_filename}"
         }
         
         return Response(stream_with_context(generate()), headers=headers)
