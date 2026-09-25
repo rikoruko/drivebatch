@@ -284,8 +284,8 @@ async function startCompression(quality) {
       $("compressProgressText").textContent = `Pulling pre-processed stream ${i + 1} of ${targetFiles.length}: ${file.name}`;
       $("compressProgressFill").style.width = `${progressPercent}%`;
 
-      // Request Google's pre-processed video stream endpoint
-      const streamUrl = `${file.direct_url}&cpn=${quality}`;
+      // Updated: Pass quality parameter correctly matching Flask backend route (/api/download/<file_id>?quality=...)
+      const streamUrl = `${file.direct_url}?quality=${quality}`;
       let blob;
       
       try {
@@ -293,7 +293,7 @@ async function startCompression(quality) {
         if (!response.ok) throw new Error("Stream quality variant fallback");
         blob = await response.blob();
       } catch (err) {
-        // Fallback to original direct binary stream if quality endpoint isn't indexed
+        // Fallback to original direct binary stream if quality endpoint fails
         const fallbackRes = await fetch(file.direct_url);
         blob = await fallbackRes.blob();
       }
