@@ -77,7 +77,7 @@ def scan_drive_folder(folder_id, media_type="video"):
 
             for file in res.get('files', []):
                 file_id = file['id']
-                # Route direct_url through the Flask proxy
+                # Route direct_url through the Flask proxy to prevent browser CORS / NetworkErrors
                 direct_url = f"/api/download/{file_id}"
                 
                 items.append({
@@ -99,11 +99,11 @@ def scan_drive_folder(folder_id, media_type="video"):
 def index():
     return render_template("index.html")
 
-@app.route("/privacy")
+@app.route("/")
 def privacy():
     return render_template("privacy.html")
 
-@app.route("/terms")
+@app.route("/")
 def terms():
     return render_template("terms.html")
 
@@ -129,13 +129,24 @@ def scan():
 
 @app.route("/api/download/<file_id>")
 def proxy_download(file_id):
-    """Proxy file downloads and Stream Saver variants through Flask to bypass CORS."""
-    target_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+    """Proxy Google Drive pre-processed video stream variants (itags) or raw downloads through Flask."""
+    quality = request.args.get("cpn")
     
-    # Forward any extra query parameters (like Stream Saver's cpn parameter)
-    cpn = request.args.get("cpn")
-    if cpn:
-        target_url += f"&cpn={cpn}"
+    # Map quality selections to Google Drive web player stream itags
+    itag_map = {
+        "1080p": "37",
+        "720p": "22",
+        "360p": "18"
+    }
+    
+    itag = itag_map.get(quality)
+
+    if not itag or quality == "original":
+        # Fallback to original raw master download
+        target_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+    else:
+        # Target Google Drive's pre-rendered web player stream variant endpoint
+        target_url = f"https://drive.google.com/uc?export=view&id={file_id}&itag={itag}"
 
     try:
         req = requests.get(target_url, stream=True, allow_redirects=True)
@@ -146,8 +157,8 @@ def proxy_download(file_id):
                     yield chunk
                     
         headers = {
-            "Content-Type": req.headers.get("Content-Type", "application/octet-stream"),
-            "Content-Disposition": req.headers.get("Content-Disposition", f"attachment; filename={file_id}")
+            "Content-Type": req.headers.get("Content-Type", "video/mp4"),
+            "Content-Disposition": req.headers.get("Content-Disposition", f"attachment; filename=video_{file_id}_{quality or 'original'}.mp4")
         }
         
         return Response(stream_with_context(generate()), headers=headers)
@@ -161,4 +172,3 @@ def auth_status():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
-    
