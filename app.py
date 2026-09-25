@@ -1,7 +1,7 @@
 import os
 import re
-import requests
-from flask import Flask, request, jsonify, render_template, Response, stream_with_context
+from flask import Flask, request, jsonify, render_template, redirect
+import yt_dlp
 from googleapiclient.discovery import build
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -47,7 +47,6 @@ def scan_drive_folder(folder_id, media_type="video"):
     while folders_to_scan:
         current_folder_id, current_path = folders_to_scan.pop(0)
         
-        # 1. Fetch sub-folders for recursive scanning
         page_token = None
         while True:
             folder_res = service.files().list(
@@ -64,7 +63,6 @@ def scan_drive_folder(folder_id, media_type="video"):
             if not page_token:
                 break
 
-        # 2. Fetch target media files
         file_query = f"'{current_folder_id}' in parents and {file_filter} and trashed = false"
         page_token = None
         while True:
@@ -127,28 +125,42 @@ def scan():
 
 @app.route("/api/download/<file_id>")
 def proxy_download(file_id):
-    """Reliable proxy download mirroring clean tools without 0-byte scraping breaks."""
+    """Extracts Google's pre-rendered resolution streams instantly using yt-dlp and redirects."""
     quality = request.args.get("quality") or request.args.get("cpn") or "original"
-    source_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+    drive_url = f"https://drive.google.com/file/d/{file_id}/view"
+
+    format_selector = 'best'
+    if "1080" in quality:
+        format_selector = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
+    elif "720" in quality:
+        format_selector = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
+    elif "480" in quality:
+        format_selector = 'bestvideo[height<=480]+bestaudio/best[height<=480]'
+    elif "360" in quality:
+        format_selector = 'bestvideo[height<=360]+bestaudio/best[height<=360]'
+
+    ydl_opts = {
+        'format': format_selector,
+        'quiet': True,
+        'no_warnings': True,
+    }
 
     try:
-        upstream_resp = requests.get(source_url, stream=True, allow_redirects=True)
-        
-        def generate():
-            for chunk in upstream_resp.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
-                    
-        output_filename = f"video_{file_id}_{quality}.mp4"
-        
-        headers = {
-            "Content-Type": upstream_resp.headers.get("Content-Type", "video/mp4"),
-            "Content-Disposition": f"attachment; filename={output_filename}"
-        }
-        
-        return Response(stream_with_context(generate()), headers=headers)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(drive_url, download=False)
+            stream_url = info.get('url')
+            
+            if not stream_url and 'formats' in info:
+                for f in info['formats']:
+                    if f.get('url'):
+                        stream_url = f.get('url')
+                        
+            if stream_url:
+                return redirect(stream_url)
+                
+            return redirect(f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}")
+    except Exception:
+        return redirect(f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}")
 
 @app.route("/api/auth/status", methods=["GET"])
 def auth_status():
@@ -157,3 +169,4 @@ def auth_status():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
+    
