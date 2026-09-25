@@ -1,7 +1,6 @@
 import os
 import re
 import requests
-import yt_dlp
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context
 from googleapiclient.discovery import build
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -48,6 +47,7 @@ def scan_drive_folder(folder_id, media_type="video"):
     while folders_to_scan:
         current_folder_id, current_path = folders_to_scan.pop(0)
         
+        # 1. Fetch sub-folders for recursive scanning
         page_token = None
         while True:
             folder_res = service.files().list(
@@ -64,6 +64,7 @@ def scan_drive_folder(folder_id, media_type="video"):
             if not page_token:
                 break
 
+        # 2. Fetch target media files
         file_query = f"'{current_folder_id}' in parents and {file_filter} and trashed = false"
         page_token = None
         while True:
@@ -126,66 +127,19 @@ def scan():
 
 @app.route("/api/download/<file_id>")
 def proxy_download(file_id):
-    """Extracts Google Drive variants using robust yt-dlp configurations."""
+    """Reliable proxy download mirroring clean tools without 0-byte scraping breaks."""
     quality = request.args.get("quality") or request.args.get("cpn") or "original"
-    drive_page_url = f"https://drive.google.com/file/d/{file_id}/view"
-
-    stream_url = None
-    target_format = None
+    source_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
 
     try:
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            # Force user-agent to prevent blocking by Google web layers
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(drive_page_url, download=False)
-            formats = info.get('formats', [])
-
-        target_height = None
-        if quality and quality != "original":
-            match = re.search(r'(\d+)', quality)
-            if match:
-                target_height = int(match.group(1))
-
-        if target_height and formats:
-            # Sort or filter matching exact target heights available
-            matching = [f for f in formats if f.get('height') == target_height and f.get('url')]
-            if matching:
-                target_format = matching[0]
-
-        # If specific height isn't found, look for closest or fallback to highest quality format available
-        if not target_format and formats:
-            valid_formats = [f for f in formats if f.get('url')]
-            if valid_formats:
-                target_format = max(valid_formats, key=lambda x: x.get('height', 0))
-
-        if target_format and target_format.get('url'):
-            stream_url = target_format['url']
-
-    except Exception as e:
-        print(f"yt-dlp resolution extraction error: {e}")
-
-    # Fallback to direct export download if manifest extraction is blocked or unavailable
-    if not stream_url:
-        stream_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
-
-    try:
-        upstream_resp = requests.get(stream_url, stream=True, allow_redirects=True)
+        upstream_resp = requests.get(source_url, stream=True, allow_redirects=True)
         
         def generate():
             for chunk in upstream_resp.iter_content(chunk_size=8192):
                 if chunk:
                     yield chunk
                     
-        ext = target_format.get('ext', 'mp4') if target_format else 'mp4'
-        output_filename = f"video_{file_id}_{quality}.{ext}"
+        output_filename = f"video_{file_id}_{quality}.mp4"
         
         headers = {
             "Content-Type": upstream_resp.headers.get("Content-Type", "video/mp4"),
