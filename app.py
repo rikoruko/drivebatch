@@ -139,10 +139,13 @@ def proxy_download(file_id):
     elif "360" in quality:
         format_selector = 'bestvideo[height<=360]+bestaudio/best[height<=360]'
 
-    ydl_opts = {
+        ydl_opts = {
         'format': format_selector,
         'quiet': True,
         'no_warnings': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
     }
 
     try:
