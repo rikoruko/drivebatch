@@ -1,8 +1,9 @@
-Flask==3.1.2
-gunicorn==23.0.0
-google-api-python-client==2.183.0
-google-auth==2.40.3
-google-auth-oauthlib==1.2.2
-static-ffmpeg
-requests==2.32.5
-google-cloud-storage==2.19.0
+Flask>=3.0.0
+Werkzeug>=3.0.0
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+static-ffmpeg>=2.5.0
+requests>=2.31.0
+gunicorn>=21.2.0
